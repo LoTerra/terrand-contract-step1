@@ -1,21 +1,20 @@
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, HandleResponse, InitResponse, MessageInfo, Order, HumanAddr, WasmQuery, CosmosMsg};
+use cosmwasm_std::{to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, Order, Querier, StdResult, Storage, StdError, WasmMsg, HumanAddr, WasmQuery, LogAttribute, CosmosMsg};
 
 use crate::error::ContractError;
-use crate::msg::{ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg, VerifyResponse};
-use crate::state::{
-    beacons_storage, beacons_storage_read, config, config_read, BeaconInfoState, State,
+use crate::msg::{
+    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg
 };
-use paired::bls12_381::{G2Affine, G1Affine, G1Compressed, G2};
-use groupy::{EncodedPoint, CurveProjective, GroupDecodingError, CurveAffine};
-use sha2::{Sha256, Digest};
-use paired::{HashToCurve, ExpandMsgXmd};
-use std::fmt;
-use schemars::_serde_json::Value;
+use crate::state::{
+    beacons_storage, beacons_storage_read, config, config_read, State,
+};
+use groupy::{CurveAffine, CurveProjective, GroupDecodingError};
+use paired::bls12_381::{G1Affine, G1Compressed, G2Affine, G2};
+use paired::{ExpandMsgXmd, HashToCurve};
+use sha2::{Digest, Sha256};
 
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, Serializer};
-//use schemars::_serde_json::value::Serializer;
+use serde::{Deserialize, Serialize};
 
 const DOMAIN: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
 
@@ -23,12 +22,11 @@ const DOMAIN: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
 
 // Note, you can use StdResult in some functions where you do not
 // make use of the custom errors
-pub fn init(
-    deps: DepsMut,
+pub fn init<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
     _env: Env,
-    _info: MessageInfo,
     msg: InitMsg,
-) -> Result<InitResponse, ContractError> {
+) -> StdResult<InitResponse> {
     let state = State {
         drand_public_key: vec![
             134, 143, 0, 94, 184, 230, 228, 202, 10, 71, 200, 167, 124, 234, 165, 48, 154, 71, 151,
@@ -36,60 +34,27 @@ pub fn init(
             102, 199, 41, 55, 132, 169, 64, 40, 1, 175, 49,
         ]
         .into(),
-        drand_step2_contract_address: msg.drand_step2_contract_address
+        drand_step2_contract_address: msg.drand_step2_contract_address,
     };
-    config(deps.storage).save(&state)?;
+    config(&mut deps.storage).save(&state)?;
 
     Ok(InitResponse::default())
 }
 
-pub fn handle(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
+pub fn handle<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
     msg: HandleMsg,
-) -> Result<HandleResponse, ContractError> {
+) ->  StdResult<HandleResponse> {
     match msg {
         HandleMsg::Drand {
             round,
             previous_signature,
             signature,
-        } => add_random(deps, info, round, previous_signature, signature),
+        } => add_random(deps, env, round, previous_signature, signature),
     }
 }
 
-#[derive(Debug)]
-pub enum InvalidPoint {
-    InvalidLength { expected: usize, actual: usize },
-    DecodingError { msg: String },
-}
-impl From<GroupDecodingError> for InvalidPoint {
-    fn from(source: GroupDecodingError) -> Self {
-        InvalidPoint::DecodingError {
-            msg: format!("{:?}", source),
-        }
-    }
-}
-
-fn g1_from_fixed(data: [u8; 48]) -> Result<G1Affine, InvalidPoint> {
-    // Workaround for https://github.com/filecoin-project/paired/pull/23
-    let mut compressed = G1Compressed::empty();
-    compressed.as_mut().copy_from_slice(&data);
-    Ok(compressed.into_affine()?)
-}
-
-fn g1_from_variable(data: &[u8]) -> Result<G1Affine, InvalidPoint> {
-    if data.len() != G1Compressed::size() {
-        return Err(InvalidPoint::InvalidLength {
-            expected: G1Compressed::size(),
-            actual: data.len(),
-        });
-    }
-
-    let mut buf = [0u8; 48];
-    buf[..].clone_from_slice(&data[..]);
-    g1_from_fixed(buf)
-}
 
 fn round_to_bytes(round: u64) -> [u8; 8] {
     round.to_be_bytes()
@@ -110,60 +75,90 @@ fn verify_step1(round: u64, previous_signature: &[u8]) -> G2Affine {
     msg_to_curve(&msg)
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-struct Verify {
-    signature: Binary,
-    msg_g2: Binary
+fn encode_msg(msg: QueryMsg) -> StdResult<CosmosMsg> {
+    Ok(WasmMsg::Execute {
+        contract_addr: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6"),
+        msg: to_binary(&msg)?,
+        send: vec![]
+    }.into())
 }
-pub fn add_random(
-    deps: DepsMut,
-    info: MessageInfo,
+
+pub fn add_random<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
     round: u64,
     previous_signature: Binary,
     signature: Binary,
-) -> Result<HandleResponse, ContractError> {
-    let state = config(deps.storage).load()?;
+) -> StdResult<HandleResponse>  {
+    let state = config(&mut deps.storage).load()?;
 
     // Handle sender is not sending funds
-    if !info.sent_funds.is_empty() {
-        return Err(ContractError::DoNotSendFunds("add_random".to_string()));
+
+    if !env.message.sent_funds.is_empty() {
+        return Err(StdError::generic_err("Do not send funds with add_random"));
     }
     // Handle sender are not adding existing rounds
-    let already_added = beacons_storage(deps.storage)
+    let already_added = beacons_storage(&mut deps.storage)
         .may_load(&round.to_be_bytes())
         .unwrap();
     if already_added.is_some() {
-        return Err(ContractError::DrandRoundAlreadyAdded(round.to_string()));
+        return Err(StdError::generic_err("Round already added"));
     }
 
     // verify random with drand-verify
     //let pk = g1_from_variable(&state.drand_public_key).unwrap();
-    let verify_step1 = verify_step1(round, &previous_signature);
-    //println!("{:?}", pk.into_compressed());
+    let verify_step1 = verify_step1(round, &previous_signature.as_slice());
+    println!("{:?}", Binary::from(verify_step1.into_compressed().as_ref()));
+    /*let e = hex::encode(verify_step1.into_compressed());
+    let decode = hex::decode(e.clone()).unwrap();
+    println!("{:?}",e);
+    println!("{:?}", verify_step1.into_compressed());
     //let x = verify_step1.into_compressed();
+    println!("{:?}", Binary::from(verify_step1.into_compressed().as_ref()));
+    println!("{:?}", Binary::from(decode));*/
+    //deps.api.
 
-    let contractAddress = deps.api.human_address(&state.drand_step2_contract_address)?;
+    /*let contract_address = deps
+        .api.human_address(&state.drand_step2_contract_address)?;*/
+    let msg = QueryMsg::Verify { signature, msg_g2: Binary::from(verify_step1.into_compressed().as_ref()) };
+    println!("{:?}", msg);
+    println!("{:?}", verify_step1.into_compressed().as_ref());
+    let res = encode_msg(msg)?;
 
+   /* let msg = query_verify(
+        deps,
+        signature,
+        Binary::from(verify_step1.into_compressed().as_ref()),
+    )?;*/
 
-    let msg = query_verify(deps.as_ref(), signature, Binary::from(verify_step1.into_compressed().as_ref()))?;
-
-    println!("{:?}", to_binary(&msg)?);
     /*let msg: CosmosMsg = Verify{
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref())
     }.into();*/
-    println!("{:?}", msg);
-    let msg = to_binary(&msg).unwrap();
-    let x:WasmQuery = deps.querier.query_wasm_smart(contractAddress, &msg).unwrap();
+
+
+    //println!("{:?}", msg);
+    //let msg: Binary = to_binary(&msg).unwrap();
+
+
+
+    //WasmQuery::Smart { contract_addr: HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()), msg};
+    /*WasmMsg::Execute {
+        contract_addr: HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()),
+        msg,
+        send: vec![]
+    };*/
+
+
+    //WasmQuery::Smart { contract_addr: Default::default(), msg }
     //let f =  Verify::serialize( &msg, Verify);
     //let f = Serializer::serialize_struct(msg, "msg", 0);
-
 
     //let contractAddress = deps.api.human_address(&state.drand_step2_contract_address)?;
     //let res = deps.querier.query_wasm_smart(contractAddress, &msg)?;
     //let res = deps.querier.query_wasm_smart(contractAddress, &msg)?;
 
-   //let valid = verify(&pk, round, &previous_signature, &signature).unwrap_or(false);
+    //let valid = verify(&pk, round, &previous_signature, &signature).unwrap_or(false);
 
     //save beacon for oracle usage
     /*beacons_storage(deps.storage).save(
@@ -174,33 +169,53 @@ pub fn add_random(
             worker: deps.api.canonical_address(&info.sender).unwrap(),
         },
     )?;*/
+    let data_msg = format!("data: {:?}",res).into_bytes();
+    Ok(HandleResponse {
+        messages: vec![res.into()],
+        data: Some(data_msg.into()),
+        log: vec![LogAttribute {
+            key: "status".to_string(),
+            value: "ok".to_string(),
+        }],
+    })
 
-    Ok(HandleResponse::default())
 }
 
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
+pub fn query<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    msg: QueryMsg,
+) -> StdResult<Binary> {
     let response = match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?)?,
         QueryMsg::GetRandomness { round } => to_binary(&query_get(deps, round)?)?,
         QueryMsg::LatestDrand {} => to_binary(&query_latest(deps)?)?,
-        QueryMsg::Verify {signature, msg_g2} => to_binary(&query_verify(deps, signature, msg_g2)?)?
+        QueryMsg::Verify { signature, msg_g2 } => {
+           to_binary(&query_verify(deps, signature, msg_g2)?)?
+        }
     };
     Ok(response)
 }
-fn query_verify(deps: Deps, signature: Binary, msg_g2: Binary) -> Result<VerifyResponse, ContractError>{
-    Ok(VerifyResponse{
-        signature,
-        msg_g2
-    }.into())
+fn query_verify<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    signature: Binary,
+    msg_g2: Binary,
+) -> StdResult<ConfigResponse> {
+    let state = config_read(&deps.storage).load()?;
+    Ok(state)
 }
 
-fn query_config(deps: Deps) -> Result<ConfigResponse, ContractError> {
-    let state = config_read(deps.storage).load()?;
+fn query_config<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<ConfigResponse> {
+    let state = config_read(&deps.storage).load()?;
     Ok(state)
 }
 // Query beacon by round
-fn query_get(deps: Deps, round: u64) -> Result<GetRandomResponse, ContractError> {
-    let beacons = beacons_storage_read(deps.storage);
+fn query_get<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    round: u64,
+) -> StdResult<GetRandomResponse> {
+    let beacons = beacons_storage_read(&deps.storage);
     let beacon = beacons.load(&round.to_be_bytes()).unwrap();
 
     Ok(GetRandomResponse {
@@ -209,13 +224,15 @@ fn query_get(deps: Deps, round: u64) -> Result<GetRandomResponse, ContractError>
     })
 }
 // Query latest beacon
-fn query_latest(deps: Deps) -> Result<LatestRandomResponse, ContractError> {
-    let store = beacons_storage_read(deps.storage);
+fn query_latest<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<LatestRandomResponse> {
+    let store = beacons_storage_read(&deps.storage);
     let mut iter = store.range(None, None, Order::Descending);
-    let (key, value) = iter.next().ok_or(ContractError::NoBeacon {})??;
+    let (_, value) = iter.next().ok_or(ContractError::NoBeacon {}).unwrap().unwrap();
 
     Ok(LatestRandomResponse {
-        round: u64::from_be_bytes(Binary(key).to_array()?),
+        round: value.round,
         randomness: value.randomness,
         worker: value.worker,
     })
@@ -224,31 +241,40 @@ fn query_latest(deps: Deps) -> Result<LatestRandomResponse, ContractError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, Api, HumanAddr, CanonicalAddr};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env};
+    use cosmwasm_std::{ Api, HumanAddr};
     use hex;
-
-
 
     #[test]
     fn add_random_test() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies(44, &[]);
 
-        let contract_address = deps.api.canonical_address(&HumanAddr::from("terra1wct6".to_string())).unwrap();
-        let info = mock_info(HumanAddr::from("creator"), &[]);
-        let init_msg = InitMsg { drand_step2_contract_address: contract_address };
-        init(deps.as_mut(), mock_env(), info, init_msg).unwrap();
+        //let x = deps.api.canonical_address();
 
 
-        let prev_sign = hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
-        let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
+        let contract_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6"))
+            .unwrap();
+        //println!("{}", HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()));
+        let init_msg = InitMsg {
+            drand_step2_contract_address: contract_address,
+        };
+        init(&mut deps, mock_env("terra", &[]),  init_msg).unwrap();
+
+        //let prev_sign = hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
+        //let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
         let round = 545216;
+        let prev_sign = Binary::from_base64("gIO9RFHWCjKIq9lQrERpO1hEjdbroVuFuKRtWJuuPf+1HIYBHJkTIJCAwjf+ycA5BA0pHjnYsgSfqD5nsMpxvhPOArAknwuAYXFQOx+NZxoxzXOr+cdndFOl953+sXii").unwrap();
+        let sign = Binary::from_base64("imgTaZQ/2cjJn+SG+i8FlqBIgQ8kuA1Izbg5BVh0pn/rbKAaysP5GSN8cjupq6kMC6JXBSpo61MDITzSNjqrEcJ1BPf4Qer2Hh2uOcR9+LHL/SFn6w9L/6Bv3PR4mMAE").unwrap();
         let msg = HandleMsg::Drand {
             round,
             previous_signature: prev_sign,
             signature: sign,
         };
-
+        let res = handle(&mut deps, mock_env("address", &[]),  msg.clone());
+        println!("{:?}", res);
+/*
         // Test do not send funds with add_random
         let info = mock_info("worker", &coins(1000, "earth"));
         let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
@@ -345,5 +371,7 @@ mod tests {
             Err(ContractError::InvalidSignature {}) => {}
             _ => panic!("Unexpected error"),
         }
+
+ */
     }
 }

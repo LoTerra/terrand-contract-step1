@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
-    pub drand_step2_contract_address: CanonicalAddr
+    pub drand_step2_contract_address: CanonicalAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -16,10 +16,13 @@ pub enum QueryMsg {
     /// Get the last randomness
     LatestDrand {},
     /// Get a specific randomness
-    GetRandomness { round: u64 },
-    Verify{
+    GetRandomness {
+        round: u64,
+    },
+    /// No used to call directly
+    Verify {
         signature: Binary,
-        msg_g2: Binary
+        msg_g2: Binary,
     },
 }
 
@@ -44,12 +47,6 @@ pub struct LatestRandomResponse {
     pub round: u64,
     pub randomness: Binary,
     pub worker: CanonicalAddr,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct VerifyResponse {
-    pub signature: Binary,
-    pub msg_g2: Binary
 }
 
 // We define a custom struct for each query response
