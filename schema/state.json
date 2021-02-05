@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "drand_public_key",
-    "drand_step2_contract_address"
+    "drand_step2_contract_address",
+    "x"
   ],
   "properties": {
     "drand_public_key": {
@@ -12,6 +13,9 @@
     },
     "drand_step2_contract_address": {
       "$ref": "#/definitions/CanonicalAddr"
+    },
+    "x": {
+      "type": "boolean"
     }
   },
   "definitions": {

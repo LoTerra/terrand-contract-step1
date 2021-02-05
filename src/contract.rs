@@ -1,17 +1,20 @@
-use cosmwasm_std::{to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, Order, Querier, StdResult, Storage, StdError, WasmMsg, HumanAddr, WasmQuery, LogAttribute, CosmosMsg};
+use cosmwasm_std::{
+    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, LogAttribute, MigrateResponse, Order, Querier, StdError, StdResult, Storage,
+    WasmMsg, WasmQuery,
+};
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg
+    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg,
 };
 use crate::state::{
-    beacons_storage, beacons_storage_read, config, config_read, State,
+    beacons_storage, beacons_storage_read, config, config_read, BeaconInfoState, State,
 };
 use groupy::{CurveAffine, CurveProjective, GroupDecodingError};
 use paired::bls12_381::{G1Affine, G1Compressed, G2Affine, G2};
 use paired::{ExpandMsgXmd, HashToCurve};
 use sha2::{Digest, Sha256};
-
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -35,6 +38,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         ]
         .into(),
         drand_step2_contract_address: msg.drand_step2_contract_address,
+        x: false,
     };
     config(&mut deps.storage).save(&state)?;
 
@@ -45,16 +49,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     msg: HandleMsg,
-) ->  StdResult<HandleResponse> {
+) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Drand {
             round,
             previous_signature,
             signature,
         } => add_random(deps, env, round, previous_signature, signature),
+        HandleMsg::ValidRandomness {round, randomness, valid, worker } => valid_random(deps, env, round, randomness, valid, worker),
     }
 }
-
 
 fn round_to_bytes(round: u64) -> [u8; 8] {
     round.to_be_bytes()
@@ -75,12 +79,13 @@ fn verify_step1(round: u64, previous_signature: &[u8]) -> G2Affine {
     msg_to_curve(&msg)
 }
 
-fn encode_msg(msg: QueryMsg) -> StdResult<CosmosMsg> {
+fn encode_msg(msg: QueryMsg, address: HumanAddr) -> StdResult<CosmosMsg> {
     Ok(WasmMsg::Execute {
-        contract_addr: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6"),
+        contract_addr:/* HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")*/ address,
         msg: to_binary(&msg)?,
         send: vec![]
-    }.into())
+    }
+    .into())
 }
 
 pub fn add_random<S: Storage, A: Api, Q: Querier>(
@@ -89,26 +94,24 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     round: u64,
     previous_signature: Binary,
     signature: Binary,
-) -> StdResult<HandleResponse>  {
-    let state = config(&mut deps.storage).load()?;
+) -> StdResult<HandleResponse> {
+    let mut state = config(&mut deps.storage).load()?;
+    let address = deps
+        .api
+        .human_address(&state.drand_step2_contract_address)?;
 
     // Handle sender is not sending funds
-
     if !env.message.sent_funds.is_empty() {
         return Err(StdError::generic_err("Do not send funds with add_random"));
-    }
-    // Handle sender are not adding existing rounds
-    let already_added = beacons_storage(&mut deps.storage)
-        .may_load(&round.to_be_bytes())
-        .unwrap();
-    if already_added.is_some() {
-        return Err(StdError::generic_err("Round already added"));
     }
 
     // verify random with drand-verify
     //let pk = g1_from_variable(&state.drand_public_key).unwrap();
     let verify_step1 = verify_step1(round, &previous_signature.as_slice());
-    println!("{:?}", Binary::from(verify_step1.into_compressed().as_ref()));
+    println!(
+        "{:?}",
+        Binary::from(verify_step1.into_compressed().as_ref())
+    );
     /*let e = hex::encode(verify_step1.into_compressed());
     let decode = hex::decode(e.clone()).unwrap();
     println!("{:?}",e);
@@ -119,13 +122,34 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     //deps.api.
 
     /*let contract_address = deps
-        .api.human_address(&state.drand_step2_contract_address)?;*/
-    let msg = QueryMsg::Verify { signature, msg_g2: Binary::from(verify_step1.into_compressed().as_ref()) };
+    .api.human_address(&state.drand_step2_contract_address)?;*/
+    let worker = deps.api.canonical_address(&env.message.sender)?;
+    //let msg = query_verify(deps, signature,Binary::from(verify_step1.into_compressed().as_ref()), worker)?;
+    let msg = QueryMsg::Verify {
+        signature,
+        msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
+        worker,
+    };
     println!("{:?}", msg);
     println!("{:?}", verify_step1.into_compressed().as_ref());
-    let res = encode_msg(msg)?;
+    let res = encode_msg(msg, address)?;
+    //let data= CosmosMsg::deserialize(res)?;
 
-   /* let msg = query_verify(
+    /*let data: HandleResponse =deps.querier.query(res.into())?;
+    let data = CosmosMsg::from(res);*/
+
+    //let data: HandleResponse = deps.querier.custom_query(res.into())?;
+
+    //let data = HandleResponse{ messages: vec![res.clone().into()], log: vec![], data: None };
+
+    //let msg = Binary::from_base64(msg.into())?;
+
+    /*if data.log[0].value == "true" {
+        state.x = true;
+        config(&mut deps.storage).save(&state);
+    }*/
+
+    /* let msg = query_verify(
         deps,
         signature,
         Binary::from(verify_step1.into_compressed().as_ref()),
@@ -136,11 +160,8 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref())
     }.into();*/
 
-
     //println!("{:?}", msg);
     //let msg: Binary = to_binary(&msg).unwrap();
-
-
 
     //WasmQuery::Smart { contract_addr: HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()), msg};
     /*WasmMsg::Execute {
@@ -148,7 +169,6 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
         msg,
         send: vec![]
     };*/
-
 
     //WasmQuery::Smart { contract_addr: Default::default(), msg }
     //let f =  Verify::serialize( &msg, Verify);
@@ -169,16 +189,62 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
             worker: deps.api.canonical_address(&info.sender).unwrap(),
         },
     )?;*/
-    let data_msg = format!("data: {:?}",res).into_bytes();
+    //let data_msg = res.into_bytes();
     Ok(HandleResponse {
         messages: vec![res.into()],
-        data: Some(data_msg.into()),
+        data: None,
         log: vec![LogAttribute {
             key: "status".to_string(),
             value: "ok".to_string(),
         }],
     })
+}
 
+pub fn valid_random<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    round: u64,
+    randomness: Binary,
+    valid: bool,
+    worker: CanonicalAddr,
+) -> StdResult<HandleResponse> {
+    let mut state = config(&mut deps.storage).load()?;
+    if env.message.sender != deps.api.human_address(&state.drand_step2_contract_address)? {
+        return Err(StdError::Unauthorized { backtrace: None });
+    }
+    if !valid {
+        return Err(StdError::generic_err("The randomness is not valid"));
+    }
+    // Handle sender are not adding existing rounds
+    let already_added = beacons_storage(&mut deps.storage)
+        .may_load(&round.to_be_bytes())
+        .unwrap();
+    if already_added.is_some() {
+        return Err(StdError::generic_err("Randomness already added"));
+    }
+    //save beacon for oracle usage
+    beacons_storage(&mut deps.storage).save(
+        &round.to_be_bytes(),
+        &BeaconInfoState {
+            round,
+            randomness: randomness.into(),
+            worker,
+        },
+    )?;
+    Ok(HandleResponse {
+        messages: vec![],
+        data: None,
+        log: vec![
+            LogAttribute {
+                key: "isValidRandomness".to_string(),
+                value: "true".to_string(),
+            },
+            LogAttribute {
+                key: "isValidRandomness".to_string(),
+                value: "true".to_string(),
+            },
+        ],
+    })
 }
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -189,9 +255,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?)?,
         QueryMsg::GetRandomness { round } => to_binary(&query_get(deps, round)?)?,
         QueryMsg::LatestDrand {} => to_binary(&query_latest(deps)?)?,
-        QueryMsg::Verify { signature, msg_g2 } => {
-           to_binary(&query_verify(deps, signature, msg_g2)?)?
-        }
+        QueryMsg::Verify {
+            signature,
+            msg_g2,
+            worker,
+        } => to_binary(&query_verify(deps, signature, msg_g2, worker)?)?,
     };
     Ok(response)
 }
@@ -199,6 +267,7 @@ fn query_verify<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     signature: Binary,
     msg_g2: Binary,
+    worker: CanonicalAddr,
 ) -> StdResult<ConfigResponse> {
     let state = config_read(&deps.storage).load()?;
     Ok(state)
@@ -229,7 +298,11 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<LatestRandomResponse> {
     let store = beacons_storage_read(&deps.storage);
     let mut iter = store.range(None, None, Order::Descending);
-    let (_, value) = iter.next().ok_or(ContractError::NoBeacon {}).unwrap().unwrap();
+    let (_, value) = iter
+        .next()
+        .ok_or(ContractError::NoBeacon {})
+        .unwrap()
+        .unwrap();
 
     Ok(LatestRandomResponse {
         round: value.round,
@@ -242,7 +315,7 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{ Api, HumanAddr};
+    use cosmwasm_std::{Api, HumanAddr};
     use hex;
 
     #[test]
@@ -251,16 +324,17 @@ mod tests {
 
         //let x = deps.api.canonical_address();
 
-
         let contract_address = deps
             .api
-            .canonical_address(&HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6"))
+            .canonical_address(&HumanAddr::from(
+                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
+            ))
             .unwrap();
         //println!("{}", HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()));
         let init_msg = InitMsg {
             drand_step2_contract_address: contract_address,
         };
-        init(&mut deps, mock_env("terra", &[]),  init_msg).unwrap();
+        init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
 
         //let prev_sign = hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
         //let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
@@ -272,106 +346,107 @@ mod tests {
             previous_signature: prev_sign,
             signature: sign,
         };
-        let res = handle(&mut deps, mock_env("address", &[]),  msg.clone());
+        let res = handle(&mut deps, mock_env("address", &[]), msg.clone());
         println!("{:?}", res);
-/*
-        // Test do not send funds with add_random
-        let info = mock_info("worker", &coins(1000, "earth"));
-        let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
-        match res {
-            Err(ContractError::DoNotSendFunds(msg)) => {
-                assert_eq!("add_random", msg);
-            }
-            _ => panic!("Unexpected error"),
-        }
 
-        // Test success
-        let info = mock_info("worker", &[]);
-        let res = handle(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-        assert_eq!(0, res.messages.len());
-        // Test if random added success
-        let (_key, beacon) = beacons_storage_read(deps.as_ref().storage)
-            .range(None, None, Order::Descending)
-            .next()
-            .ok_or(ContractError::NoBeacon {})
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
-            hex::encode(beacon.randomness.to_vec())
-        );
-        assert_eq!(545216, beacon.round);
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr("worker".to_string()))
-                .unwrap(),
-            beacon.worker
-        );
+        /*
+               // Test do not send funds with add_random
+               let info = mock_info("worker", &coins(1000, "earth"));
+               let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
+               match res {
+                   Err(ContractError::DoNotSendFunds(msg)) => {
+                       assert_eq!("add_random", msg);
+                   }
+                   _ => panic!("Unexpected error"),
+               }
 
-        // Test query by round
-        let round = query_get(deps.as_ref(), 545216).unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr("worker".to_string()))
-                .unwrap(),
-            round.worker
-        );
-        assert_eq!(
-            "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
-            hex::encode(round.randomness.to_vec())
-        );
+               // Test success
+               let info = mock_info("worker", &[]);
+               let res = handle(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+               assert_eq!(0, res.messages.len());
+               // Test if random added success
+               let (_key, beacon) = beacons_storage_read(deps.as_ref().storage)
+                   .range(None, None, Order::Descending)
+                   .next()
+                   .ok_or(ContractError::NoBeacon {})
+                   .unwrap()
+                   .unwrap();
+               assert_eq!(
+                   "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
+                   hex::encode(beacon.randomness.to_vec())
+               );
+               assert_eq!(545216, beacon.round);
+               assert_eq!(
+                   deps.api
+                       .canonical_address(&HumanAddr("worker".to_string()))
+                       .unwrap(),
+                   beacon.worker
+               );
 
-        // Test adding round already added
-        let info = mock_info("worker", &[]);
-        let res = handle(deps.as_mut(), mock_env(), info, msg);
-        match res {
-            Err(ContractError::DrandRoundAlreadyAdded(msg)) => {
-                assert_eq!("545216", msg)
-            }
-            _ => panic!("Unexpected error"),
-        }
+               // Test query by round
+               let round = query_get(deps.as_ref(), 545216).unwrap();
+               assert_eq!(
+                   deps.api
+                       .canonical_address(&HumanAddr("worker".to_string()))
+                       .unwrap(),
+                   round.worker
+               );
+               assert_eq!(
+                   "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
+                   hex::encode(round.randomness.to_vec())
+               );
 
-        // add new round
-        let prev_sign = hex::decode("ae5787851eb270eb0d167d5cb7c7a1494b640c4e01f7aed0aa556cd9f92f0e4f6bf7cedcb6cb36ae96de380fc04945bd19928f57a6e1d878b862c7a8d9e6bd3f3def0b3ff337eeeae18263fee2c6165c7674af864dd48a78485f831015088f20").unwrap().into();
-        let sign = hex::decode("8fd46b28c04a574be0845b8ddd2c86fc12a4203896668e0479f71f73ffa5504a69bd0240730b6c61df2ca240406d41300f723f934a5908a19334312ae6695d0adf014ad4b6b990507b16220f19f3b9246a092a24f571baecd15519db0906877c").unwrap().into();
-        let round = 550625;
-        let msg = HandleMsg::Drand {
-            round,
-            previous_signature: prev_sign,
-            signature: sign,
-        };
-        let info = mock_info("worker1", &[]);
-        let _res = handle(deps.as_mut(), mock_env(), info, msg);
-        // Test query latest randomness
-        let latest_round = query_latest(deps.as_ref()).unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr("worker1".to_string()))
-                .unwrap(),
-            latest_round.worker
-        );
-        assert_eq!(
-            "85c3054b7bef980fbcbce58fb55315f249ba3ca370f392d185afd58a4605c4a4",
-            hex::encode(latest_round.randomness.to_vec())
-        );
-        assert_eq!(550625, latest_round.round);
+               // Test adding round already added
+               let info = mock_info("worker", &[]);
+               let res = handle(deps.as_mut(), mock_env(), info, msg);
+               match res {
+                   Err(ContractError::DrandRoundAlreadyAdded(msg)) => {
+                       assert_eq!("545216", msg)
+                   }
+                   _ => panic!("Unexpected error"),
+               }
 
-        // Test adding new round but with invalid signature
-        let prev_sign = hex::decode("aeed0265092cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
-        let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
-        let round = 545226;
-        let msg = HandleMsg::Drand {
-            round,
-            previous_signature: prev_sign,
-            signature: sign,
-        };
-        let info = mock_info("worker", &[]);
-        let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
-        match res {
-            Err(ContractError::InvalidSignature {}) => {}
-            _ => panic!("Unexpected error"),
-        }
+               // add new round
+               let prev_sign = hex::decode("ae5787851eb270eb0d167d5cb7c7a1494b640c4e01f7aed0aa556cd9f92f0e4f6bf7cedcb6cb36ae96de380fc04945bd19928f57a6e1d878b862c7a8d9e6bd3f3def0b3ff337eeeae18263fee2c6165c7674af864dd48a78485f831015088f20").unwrap().into();
+               let sign = hex::decode("8fd46b28c04a574be0845b8ddd2c86fc12a4203896668e0479f71f73ffa5504a69bd0240730b6c61df2ca240406d41300f723f934a5908a19334312ae6695d0adf014ad4b6b990507b16220f19f3b9246a092a24f571baecd15519db0906877c").unwrap().into();
+               let round = 550625;
+               let msg = HandleMsg::Drand {
+                   round,
+                   previous_signature: prev_sign,
+                   signature: sign,
+               };
+               let info = mock_info("worker1", &[]);
+               let _res = handle(deps.as_mut(), mock_env(), info, msg);
+               // Test query latest randomness
+               let latest_round = query_latest(deps.as_ref()).unwrap();
+               assert_eq!(
+                   deps.api
+                       .canonical_address(&HumanAddr("worker1".to_string()))
+                       .unwrap(),
+                   latest_round.worker
+               );
+               assert_eq!(
+                   "85c3054b7bef980fbcbce58fb55315f249ba3ca370f392d185afd58a4605c4a4",
+                   hex::encode(latest_round.randomness.to_vec())
+               );
+               assert_eq!(550625, latest_round.round);
 
- */
+               // Test adding new round but with invalid signature
+               let prev_sign = hex::decode("aeed0265092cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
+               let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
+               let round = 545226;
+               let msg = HandleMsg::Drand {
+                   round,
+                   previous_signature: prev_sign,
+                   signature: sign,
+               };
+               let info = mock_info("worker", &[]);
+               let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
+               match res {
+                   Err(ContractError::InvalidSignature {}) => {}
+                   _ => panic!("Unexpected error"),
+               }
+
+        */
     }
 }

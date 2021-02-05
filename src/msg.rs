@@ -1,5 +1,5 @@
 use crate::state::State;
-use cosmwasm_std::{Binary, CanonicalAddr};
+use cosmwasm_std::{Binary, CanonicalAddr, HumanAddr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -16,24 +16,26 @@ pub enum QueryMsg {
     /// Get the last randomness
     LatestDrand {},
     /// Get a specific randomness
-    GetRandomness {
-        round: u64,
-    },
+    GetRandomness { round: u64 },
     /// No used to call directly
     Verify {
         signature: Binary,
         msg_g2: Binary,
+        worker: CanonicalAddr,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
+    /// Add random from this
     Drand {
         round: u64,
         previous_signature: Binary,
         signature: Binary,
     },
+    /// No used to call directly
+    ValidRandomness { round: u64, randomness: Binary, valid: bool, worker: CanonicalAddr },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]

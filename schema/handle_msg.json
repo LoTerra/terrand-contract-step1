@@ -3,6 +3,7 @@
   "title": "HandleMsg",
   "anyOf": [
     {
+      "description": "Add random from this",
       "type": "object",
       "required": [
         "drand"
@@ -30,12 +31,49 @@
           }
         }
       }
+    },
+    {
+      "description": "No used to call directly",
+      "type": "object",
+      "required": [
+        "valid_randomness"
+      ],
+      "properties": {
+        "valid_randomness": {
+          "type": "object",
+          "required": [
+            "randomness",
+            "round",
+            "valid",
+            "worker"
+          ],
+          "properties": {
+            "randomness": {
+              "$ref": "#/definitions/Binary"
+            },
+            "round": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "valid": {
+              "type": "boolean"
+            },
+            "worker": {
+              "$ref": "#/definitions/CanonicalAddr"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
     "Binary": {
       "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
       "type": "string"
+    },
+    "CanonicalAddr": {
+      "$ref": "#/definitions/Binary"
     }
   }
 }

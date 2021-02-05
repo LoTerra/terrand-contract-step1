@@ -4,7 +4,7 @@ use std::fs::create_dir_all;
 use cosmwasm_schema::{export_schema, export_schema_with_title, remove_schemas, schema_for};
 
 use drand_lottery::msg::{
-    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, VerifyResponse
+    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse,
 };
 use drand_lottery::state::State;
 
@@ -26,10 +26,5 @@ fn main() {
         &mut schema_for!(LatestRandomResponse),
         &out_dir,
         "LatestRandomResponse",
-    );
-    export_schema_with_title(
-        &mut schema_for!(VerifyResponse),
-        &out_dir,
-        "VerifyResponse",
     );
 }
