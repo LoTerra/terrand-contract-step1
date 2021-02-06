@@ -15,7 +15,7 @@ pub enum QueryMsg {
     Config {},
     /// Get the last randomness
     LatestDrand {},
-    /// Get a specific randomnesvs
+    /// Get a specific randomness
     GetRandomness { round: u64 },
     /// Not used to be call directly
     Verify {
