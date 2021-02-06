@@ -38,7 +38,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         ]
         .into(),
         drand_step2_contract_address: msg.drand_step2_contract_address,
-        x: false,
     };
     config(&mut deps.storage).save(&state)?;
 
@@ -56,7 +55,12 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             previous_signature,
             signature,
         } => add_random(deps, env, round, previous_signature, signature),
-        HandleMsg::ValidRandomness {round, randomness, valid, worker } => valid_random(deps, env, round, randomness, valid, worker),
+        HandleMsg::ValidRandomness {
+            round,
+            randomness,
+            valid,
+            worker,
+        } => valid_random(deps, env, round, randomness, valid, worker),
     }
 }
 
@@ -81,9 +85,9 @@ fn verify_step1(round: u64, previous_signature: &[u8]) -> G2Affine {
 
 fn encode_msg(msg: QueryMsg, address: HumanAddr) -> StdResult<CosmosMsg> {
     Ok(WasmMsg::Execute {
-        contract_addr:/* HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")*/ address,
+        contract_addr: address,
         msg: to_binary(&msg)?,
-        send: vec![]
+        send: vec![],
     }
     .into())
 }
@@ -96,9 +100,11 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     signature: Binary,
 ) -> StdResult<HandleResponse> {
     let mut state = config(&mut deps.storage).load()?;
-    let address = deps
-        .api
-        .human_address(&state.drand_step2_contract_address)?;
+    let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+
+    /*deps
+    .api
+    .human_address(&state.drand_step2_contract_address)?;*/
 
     // Handle sender is not sending funds
     if !env.message.sent_funds.is_empty() {
@@ -123,7 +129,11 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
 
     /*let contract_address = deps
     .api.human_address(&state.drand_step2_contract_address)?;*/
-    let worker = deps.api.canonical_address(&env.message.sender)?;
+    //let x = CanonicalAddr::from(&env.message.sender);
+
+    //let worker = CanonicalAddr::from(HumanAddr::to_string(&env.message.sender).as_bytes());
+
+    let worker = CanonicalAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".as_bytes());
     //let msg = query_verify(deps, signature,Binary::from(verify_step1.into_compressed().as_ref()), worker)?;
     let msg = QueryMsg::Verify {
         signature,
@@ -132,7 +142,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     };
     println!("{:?}", msg);
     println!("{:?}", verify_step1.into_compressed().as_ref());
-    let res = encode_msg(msg, address)?;
+    let res = encode_msg(msg, contract_address)?;
     //let data= CosmosMsg::deserialize(res)?;
 
     /*let data: HandleResponse =deps.querier.query(res.into())?;
@@ -202,14 +212,16 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
 
 pub fn valid_random<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     round: u64,
     randomness: Binary,
     valid: bool,
     worker: CanonicalAddr,
 ) -> StdResult<HandleResponse> {
     let mut state = config(&mut deps.storage).load()?;
-    if env.message.sender != deps.api.human_address(&state.drand_step2_contract_address)? {
+    //deps.api.human_address(&state.drand_step2_contract_address)?
+    //env.message.sender
+    if env.message.sender != HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6") {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
@@ -234,16 +246,10 @@ pub fn valid_random<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         data: None,
-        log: vec![
-            LogAttribute {
-                key: "isValidRandomness".to_string(),
-                value: "true".to_string(),
-            },
-            LogAttribute {
-                key: "isValidRandomness".to_string(),
-                value: "true".to_string(),
-            },
-        ],
+        log: vec![LogAttribute {
+            key: "isValidRandomness".to_string(),
+            value: "true".to_string(),
+        }],
     })
 }
 
@@ -300,7 +306,10 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
     let mut iter = store.range(None, None, Order::Descending);
     let (_, value) = iter
         .next()
-        .ok_or(ContractError::NoBeacon {})
+        .ok_or(StdError::NotFound {
+            kind: "No beacon".to_string(),
+            backtrace: None,
+        })
         .unwrap()
         .unwrap();
 
@@ -317,7 +326,40 @@ mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
     use cosmwasm_std::{Api, HumanAddr};
     use hex;
+    #[test]
+    fn valid_randomness() {
+        let mut deps = mock_dependencies(44, &[]);
+        let contract_address = deps
+            .api
+            .canonical_address(&HumanAddr::from(
+                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
+            ))
+            .unwrap();
+        let init_msg = InitMsg {
+            drand_step2_contract_address: contract_address,
+        };
+        init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
 
+        let worker_address = deps
+            .api
+            .canonical_address(&HumanAddr::from(
+                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
+            ))
+            .unwrap();
+        let msg = HandleMsg::ValidRandomness {
+            round: 2234234,
+            randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            valid: true,
+            worker: worker_address
+        };
+
+        let res = handle(
+            &mut deps,
+            mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+            msg.clone(),
+        );
+        println!("{:?}", res);
+    }
     #[test]
     fn add_random_test() {
         let mut deps = mock_dependencies(44, &[]);

@@ -35,7 +35,12 @@ pub enum HandleMsg {
         signature: Binary,
     },
     /// No used to call directly
-    ValidRandomness { round: u64, randomness: Binary, valid: bool, worker: CanonicalAddr },
+    ValidRandomness {
+        round: u64,
+        randomness: Binary,
+        valid: bool,
+        worker: CanonicalAddr,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]

@@ -14,7 +14,6 @@ const BEACONS_KEY: &[u8] = b"beacons";
 pub struct State {
     pub drand_public_key: Binary,
     pub drand_step2_contract_address: CanonicalAddr,
-    pub x: bool,
 }
 
 pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, State> {
