@@ -93,9 +93,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     signature: Binary,
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
-    let contract_address = deps
-        .api
-        .human_address(&state.drand_step2_contract_address)?;
+    let contract_address = state.drand_step2_contract_address;
     let worker = deps.api.canonical_address(&env.message.sender)?;
     // Handle sender is not sending funds
     if !env.message.sent_funds.is_empty() {
@@ -133,11 +131,7 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
     let state = config(&mut deps.storage).load()?;
 
     //env.message.sender
-    if env.message.sender
-        != deps
-            .api
-            .human_address(&state.drand_step2_contract_address)?
-    {
+    if env.message.sender != state.drand_step2_contract_address {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
@@ -247,12 +241,9 @@ mod tests {
     #[test]
     fn valid_randomness() {
         let mut deps = mock_dependencies(44, &[]);
-        let contract_address = deps
-            .api
-            .canonical_address(&HumanAddr::from(
-                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
-            ))
-            .unwrap();
+        let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+        let data = deps.api.canonical_address(&HumanAddr::from("terra1x46rqay4d3cssq8gxxvqz8xt6nwlz4td20k38v")).unwrap();
+        println!("{:?}", data);
         let init_msg = InitMsg {
             drand_step2_contract_address: contract_address,
         };
@@ -281,15 +272,7 @@ mod tests {
     #[test]
     fn add_random_test() {
         let mut deps = mock_dependencies(44, &[]);
-
-        //let x = deps.api.canonical_address();
-
-        let contract_address = deps
-            .api
-            .canonical_address(&HumanAddr::from(
-                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
-            ))
-            .unwrap();
+        let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
         //println!("{}", HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()));
         let init_msg = InitMsg {
             drand_step2_contract_address: contract_address,

@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, CanonicalAddr, Storage};
+use cosmwasm_std::{Binary, CanonicalAddr, HumanAddr, Storage};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -13,7 +13,7 @@ const BEACONS_KEY: &[u8] = b"beacons";
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
     pub drand_public_key: Binary,
-    pub drand_step2_contract_address: CanonicalAddr,
+    pub drand_step2_contract_address: HumanAddr,
 }
 
 pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, State> {
