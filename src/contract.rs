@@ -1,7 +1,6 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse,
-    InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage,
-    WasmMsg, HumanAddr
+    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
 };
 
 use crate::msg::{
@@ -94,7 +93,9 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     signature: Binary,
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
-    let contract_address = deps.api.human_address(&state.drand_step2_contract_address)?;
+    let contract_address = deps
+        .api
+        .human_address(&state.drand_step2_contract_address)?;
     let worker = deps.api.canonical_address(&env.message.sender)?;
     // Handle sender is not sending funds
     if !env.message.sent_funds.is_empty() {
@@ -106,7 +107,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
         worker,
-        round
+        round,
     };
 
     let res = encode_msg(msg, contract_address)?;
@@ -132,7 +133,11 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
     let state = config(&mut deps.storage).load()?;
 
     //env.message.sender
-    if env.message.sender != deps.api.human_address(&state.drand_step2_contract_address)? {
+    if env.message.sender
+        != deps
+            .api
+            .human_address(&state.drand_step2_contract_address)?
+    {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
@@ -176,7 +181,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             signature,
             msg_g2,
             worker,
-            round
+            round,
         } => to_binary(&query_verify(deps, signature, msg_g2, worker, round)?)?,
     };
     Ok(response)
@@ -186,7 +191,7 @@ fn query_verify<S: Storage, A: Api, Q: Querier>(
     _signature: Binary,
     _msg_g2: Binary,
     _worker: CanonicalAddr,
-    _round: u64
+    _round: u64,
 ) -> StdResult<ConfigResponse> {
     let state = config_read(&deps.storage).load()?;
     Ok(state)

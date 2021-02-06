@@ -22,7 +22,7 @@ pub enum QueryMsg {
         signature: Binary,
         msg_g2: Binary,
         worker: CanonicalAddr,
-        round: u64
+        round: u64,
     },
 }
 
