@@ -139,6 +139,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
         worker,
+        round
     };
     println!("{:?}", msg);
     println!("{:?}", verify_step1.into_compressed().as_ref());
@@ -212,7 +213,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
 
 pub fn valid_random<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    env: Env,
     round: u64,
     randomness: Binary,
     valid: bool,
@@ -265,6 +266,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             signature,
             msg_g2,
             worker,
+            round
         } => to_binary(&query_verify(deps, signature, msg_g2, worker)?)?,
     };
     Ok(response)

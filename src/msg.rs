@@ -15,13 +15,14 @@ pub enum QueryMsg {
     Config {},
     /// Get the last randomness
     LatestDrand {},
-    /// Get a specific randomness
+    /// Get a specific randomnesvs
     GetRandomness { round: u64 },
-    /// No used to call directly
+    /// Not used to be call directly
     Verify {
         signature: Binary,
         msg_g2: Binary,
         worker: CanonicalAddr,
+        round: u64
     },
 }
 
@@ -34,7 +35,7 @@ pub enum HandleMsg {
         previous_signature: Binary,
         signature: Binary,
     },
-    /// No used to call directly
+    /// Not used to be call directly
     ValidRandomness {
         round: u64,
         randomness: Binary,
