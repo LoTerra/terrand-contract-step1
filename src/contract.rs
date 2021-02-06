@@ -1,27 +1,21 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, LogAttribute, MigrateResponse, Order, Querier, StdError, StdResult, Storage,
-    WasmMsg, WasmQuery,
+    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse,
+    InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage,
+    WasmMsg, HumanAddr
 };
 
-use crate::error::ContractError;
 use crate::msg::{
     ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg,
 };
 use crate::state::{
     beacons_storage, beacons_storage_read, config, config_read, BeaconInfoState, State,
 };
-use groupy::{CurveAffine, CurveProjective, GroupDecodingError};
-use paired::bls12_381::{G1Affine, G1Compressed, G2Affine, G2};
+use groupy::{CurveAffine, CurveProjective};
+use paired::bls12_381::{G2Affine, G2};
 use paired::{ExpandMsgXmd, HashToCurve};
 use sha2::{Digest, Sha256};
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 const DOMAIN: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
-
-// use drand_verify::{derive_randomness, g1_from_variable, verify};
 
 // Note, you can use StdResult in some functions where you do not
 // make use of the custom errors
@@ -55,12 +49,12 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             previous_signature,
             signature,
         } => add_random(deps, env, round, previous_signature, signature),
-        HandleMsg::ValidRandomness {
+        HandleMsg::VerifyCallBack {
             round,
             randomness,
             valid,
             worker,
-        } => valid_random(deps, env, round, randomness, valid, worker),
+        } => verify_call_back(deps, env, round, randomness, valid, worker),
     }
 }
 
@@ -99,108 +93,24 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     previous_signature: Binary,
     signature: Binary,
 ) -> StdResult<HandleResponse> {
-    let mut state = config(&mut deps.storage).load()?;
-    let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
-
-    /*deps
-    .api
-    .human_address(&state.drand_step2_contract_address)?;*/
-
+    let state = config(&mut deps.storage).load()?;
+    let contract_address = deps.api.human_address(&state.drand_step2_contract_address)?;
+    let worker = deps.api.canonical_address(&env.message.sender)?;
     // Handle sender is not sending funds
     if !env.message.sent_funds.is_empty() {
         return Err(StdError::generic_err("Do not send funds with add_random"));
     }
 
-    // verify random with drand-verify
-    //let pk = g1_from_variable(&state.drand_public_key).unwrap();
     let verify_step1 = verify_step1(round, &previous_signature.as_slice());
-    println!(
-        "{:?}",
-        Binary::from(verify_step1.into_compressed().as_ref())
-    );
-    /*let e = hex::encode(verify_step1.into_compressed());
-    let decode = hex::decode(e.clone()).unwrap();
-    println!("{:?}",e);
-    println!("{:?}", verify_step1.into_compressed());
-    //let x = verify_step1.into_compressed();
-    println!("{:?}", Binary::from(verify_step1.into_compressed().as_ref()));
-    println!("{:?}", Binary::from(decode));*/
-    //deps.api.
-
-    /*let contract_address = deps
-    .api.human_address(&state.drand_step2_contract_address)?;*/
-    //let x = CanonicalAddr::from(&env.message.sender);
-
-    //let worker = CanonicalAddr::from(HumanAddr::to_string(&env.message.sender).as_bytes());
-
-    let worker = CanonicalAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".as_bytes());
-    //let msg = query_verify(deps, signature,Binary::from(verify_step1.into_compressed().as_ref()), worker)?;
     let msg = QueryMsg::Verify {
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
         worker,
         round
     };
-    println!("{:?}", msg);
-    println!("{:?}", verify_step1.into_compressed().as_ref());
+
     let res = encode_msg(msg, contract_address)?;
-    //let data= CosmosMsg::deserialize(res)?;
 
-    /*let data: HandleResponse =deps.querier.query(res.into())?;
-    let data = CosmosMsg::from(res);*/
-
-    //let data: HandleResponse = deps.querier.custom_query(res.into())?;
-
-    //let data = HandleResponse{ messages: vec![res.clone().into()], log: vec![], data: None };
-
-    //let msg = Binary::from_base64(msg.into())?;
-
-    /*if data.log[0].value == "true" {
-        state.x = true;
-        config(&mut deps.storage).save(&state);
-    }*/
-
-    /* let msg = query_verify(
-        deps,
-        signature,
-        Binary::from(verify_step1.into_compressed().as_ref()),
-    )?;*/
-
-    /*let msg: CosmosMsg = Verify{
-        signature,
-        msg_g2: Binary::from(verify_step1.into_compressed().as_ref())
-    }.into();*/
-
-    //println!("{:?}", msg);
-    //let msg: Binary = to_binary(&msg).unwrap();
-
-    //WasmQuery::Smart { contract_addr: HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()), msg};
-    /*WasmMsg::Execute {
-        contract_addr: HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()),
-        msg,
-        send: vec![]
-    };*/
-
-    //WasmQuery::Smart { contract_addr: Default::default(), msg }
-    //let f =  Verify::serialize( &msg, Verify);
-    //let f = Serializer::serialize_struct(msg, "msg", 0);
-
-    //let contractAddress = deps.api.human_address(&state.drand_step2_contract_address)?;
-    //let res = deps.querier.query_wasm_smart(contractAddress, &msg)?;
-    //let res = deps.querier.query_wasm_smart(contractAddress, &msg)?;
-
-    //let valid = verify(&pk, round, &previous_signature, &signature).unwrap_or(false);
-
-    //save beacon for oracle usage
-    /*beacons_storage(deps.storage).save(
-        &round.to_be_bytes(),
-        &BeaconInfoState {
-            round,
-            randomness: randomness.into(),
-            worker: deps.api.canonical_address(&info.sender).unwrap(),
-        },
-    )?;*/
-    //let data_msg = res.into_bytes();
     Ok(HandleResponse {
         messages: vec![res.into()],
         data: None,
@@ -211,7 +121,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-pub fn valid_random<S: Storage, A: Api, Q: Querier>(
+pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     round: u64,
@@ -219,10 +129,10 @@ pub fn valid_random<S: Storage, A: Api, Q: Querier>(
     valid: bool,
     worker: CanonicalAddr,
 ) -> StdResult<HandleResponse> {
-    let mut state = config(&mut deps.storage).load()?;
-    //deps.api.human_address(&state.drand_step2_contract_address)?
+    let state = config(&mut deps.storage).load()?;
+
     //env.message.sender
-    if env.message.sender != HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6") {
+    if env.message.sender != deps.api.human_address(&state.drand_step2_contract_address)? {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
@@ -267,15 +177,16 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             msg_g2,
             worker,
             round
-        } => to_binary(&query_verify(deps, signature, msg_g2, worker)?)?,
+        } => to_binary(&query_verify(deps, signature, msg_g2, worker, round)?)?,
     };
     Ok(response)
 }
 fn query_verify<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    signature: Binary,
-    msg_g2: Binary,
-    worker: CanonicalAddr,
+    _signature: Binary,
+    _msg_g2: Binary,
+    _worker: CanonicalAddr,
+    _round: u64
 ) -> StdResult<ConfigResponse> {
     let state = config_read(&deps.storage).load()?;
     Ok(state)
@@ -348,7 +259,7 @@ mod tests {
                 "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
             ))
             .unwrap();
-        let msg = HandleMsg::ValidRandomness {
+        let msg = HandleMsg::VerifyCallBack {
             round: 2234234,
             randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
             valid: true,

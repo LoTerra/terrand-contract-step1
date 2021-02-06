@@ -33,13 +33,13 @@
       }
     },
     {
-      "description": "No used to call directly",
+      "description": "Not used to be call directly",
       "type": "object",
       "required": [
-        "valid_randomness"
+        "verify_call_back"
       ],
       "properties": {
-        "valid_randomness": {
+        "verify_call_back": {
           "type": "object",
           "required": [
             "randomness",

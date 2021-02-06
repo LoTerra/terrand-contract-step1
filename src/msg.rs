@@ -36,7 +36,7 @@ pub enum HandleMsg {
         signature: Binary,
     },
     /// Not used to be call directly
-    ValidRandomness {
+    VerifyCallBack {
         round: u64,
         randomness: Binary,
         valid: bool,
