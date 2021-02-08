@@ -1,1 +1,1 @@
-5acd98074449887621c57dc9602ee2a53a59b75c8bb24cfeab6f88871fc50e86  drand_lottery.wasm
+2dc46af036cadd59d34dae5a7b209c73bb56769dda97e8074d701619ca306a53  drand_lottery.wasm
