@@ -1,5 +1,5 @@
 use crate::state::State;
-use cosmwasm_std::{Binary, CanonicalAddr, HumanAddr};
+use cosmwasm_std::{Binary, HumanAddr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ pub enum QueryMsg {
     Verify {
         signature: Binary,
         msg_g2: Binary,
-        worker: CanonicalAddr,
+        worker: HumanAddr,
         round: u64,
     },
 }
@@ -40,21 +40,21 @@ pub enum HandleMsg {
         round: u64,
         randomness: Binary,
         valid: bool,
-        worker: CanonicalAddr,
+        worker: HumanAddr,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct GetRandomResponse {
     pub randomness: Binary,
-    pub worker: CanonicalAddr,
+    pub worker: HumanAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct LatestRandomResponse {
     pub round: u64,
     pub randomness: Binary,
-    pub worker: CanonicalAddr,
+    pub worker: HumanAddr,
 }
 
 // We define a custom struct for each query response

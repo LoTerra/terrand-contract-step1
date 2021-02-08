@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
     InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
 };
 
@@ -24,12 +24,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let state = State {
-        drand_public_key: vec![
-            134, 143, 0, 94, 184, 230, 228, 202, 10, 71, 200, 167, 124, 234, 165, 48, 154, 71, 151,
-            138, 124, 113, 188, 92, 206, 150, 54, 107, 93, 122, 86, 153, 55, 197, 41, 238, 218,
-            102, 199, 41, 55, 132, 169, 64, 40, 1, 175, 49,
-        ]
-        .into(),
         drand_step2_contract_address: msg.drand_step2_contract_address,
     };
     config(&mut deps.storage).save(&state)?;
@@ -94,7 +88,6 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
     let contract_address = state.drand_step2_contract_address;
-    let worker = deps.api.canonical_address(&env.message.sender)?;
     // Handle sender is not sending funds
     if !env.message.sent_funds.is_empty() {
         return Err(StdError::generic_err("Do not send funds with add_random"));
@@ -104,7 +97,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     let msg = QueryMsg::Verify {
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
-        worker,
+        worker: env.message.sender,
         round,
     };
 
@@ -113,10 +106,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![res.into()],
         data: None,
-        log: vec![LogAttribute {
-            key: "status".to_string(),
-            value: "ok".to_string(),
-        }],
+        log: vec![],
     })
 }
 
@@ -126,10 +116,10 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
     round: u64,
     randomness: Binary,
     valid: bool,
-    worker: CanonicalAddr,
+    worker: HumanAddr,
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
-
+    let canonical_address = deps.api.canonical_address(&worker)?;
     //env.message.sender
     if env.message.sender != state.drand_step2_contract_address {
         return Err(StdError::Unauthorized { backtrace: None });
@@ -150,7 +140,7 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
         &BeaconInfoState {
             round,
             randomness: randomness.into(),
-            worker,
+            worker: canonical_address,
         },
     )?;
     Ok(HandleResponse {
@@ -172,23 +162,18 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::GetRandomness { round } => to_binary(&query_get(deps, round)?)?,
         QueryMsg::LatestDrand {} => to_binary(&query_latest(deps)?)?,
         QueryMsg::Verify {
-            signature,
-            msg_g2,
-            worker,
-            round,
-        } => to_binary(&query_verify(deps, signature, msg_g2, worker, round)?)?,
+            signature: _,
+            msg_g2: _,
+            worker: _,
+            round: _,
+        } => to_binary(&query_verify(deps)?)?,
     };
     Ok(response)
 }
 fn query_verify<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    _signature: Binary,
-    _msg_g2: Binary,
-    _worker: CanonicalAddr,
-    _round: u64,
-) -> StdResult<ConfigResponse> {
-    let state = config_read(&deps.storage).load()?;
-    Ok(state)
+    _deps: &Extern<S, A, Q>,
+) -> StdResult<StdError> {
+    Err(StdError::Unauthorized { backtrace: None })
 }
 
 fn query_config<S: Storage, A: Api, Q: Querier>(
@@ -207,7 +192,7 @@ fn query_get<S: Storage, A: Api, Q: Querier>(
 
     Ok(GetRandomResponse {
         randomness: beacon.randomness,
-        worker: beacon.worker,
+        worker: deps.api.human_address(&beacon.worker)?,
     })
 }
 // Query latest beacon
@@ -228,7 +213,7 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
     Ok(LatestRandomResponse {
         round: value.round,
         randomness: value.randomness,
-        worker: value.worker,
+        worker: deps.api.human_address(&value.worker)?,
     })
 }
 
@@ -236,51 +221,175 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{Api, HumanAddr};
+    use cosmwasm_std::{HumanAddr};
     use hex;
-    #[test]
-    fn valid_randomness() {
-        let mut deps = mock_dependencies(44, &[]);
-        let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
-        let data = deps.api.canonical_address(&HumanAddr::from("terra1x46rqay4d3cssq8gxxvqz8xt6nwlz4td20k38v")).unwrap();
-        println!("{:?}", data);
-        let init_msg = InitMsg {
-            drand_step2_contract_address: contract_address,
-        };
-        init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
 
-        let worker_address = deps
-            .api
-            .canonical_address(&HumanAddr::from(
-                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6",
-            ))
-            .unwrap();
-        let msg = HandleMsg::VerifyCallBack {
-            round: 2234234,
-            randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-            valid: true,
-            worker: worker_address
-        };
+    mod verify_call_back {
+        use super::*;
+        use cosmwasm_std::StdError::GenericErr;
+        use cosmwasm_std::StdError::{Unauthorized};
 
-        let res = handle(
-            &mut deps,
-            mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
-            msg.clone(),
-        );
-        println!("{:?}", res);
+        #[test]
+        fn success() {
+            let mut deps = mock_dependencies(44, &[]);
+            let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+            let init_msg = InitMsg {
+                drand_step2_contract_address: contract_address.clone(),
+            };
+            init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
+
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234234,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: true,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345")
+            };
+
+            let res = handle(
+                &mut deps,
+                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+                msg.clone(),
+            ).unwrap();
+            let log_res: bool = res.log[0].value.parse().unwrap();
+            assert!(log_res);
+
+            // Add other one
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234230,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: true,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876")
+            };
+
+            let _res = handle(
+                &mut deps,
+                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+                msg.clone(),
+            );
+
+            // get latest round
+            let state = query_latest(&mut deps).unwrap();
+            assert_eq!(HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345"), state.worker);
+
+            // get custom round
+            let state = query_get(&mut deps, 2234230).unwrap();
+            assert_eq!(HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876"), state.worker);
+
+        }
+
+        #[test]
+        fn not_valid_randomness() {
+            let mut deps = mock_dependencies(44, &[]);
+            let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+            let init_msg = InitMsg {
+                drand_step2_contract_address: contract_address,
+            };
+            init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
+
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234234,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: false,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")
+            };
+
+            let res = handle(
+                &mut deps,
+                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+                msg.clone(),
+            );
+
+            match res {
+                Err(GenericErr { msg, backtrace: None }) => {
+                    assert_eq!("The randomness is not valid", msg)
+                },
+                _ => panic!("Unexpected error")
+            }
+        }
+
+        #[test]
+        fn sender_is_not_authorized() {
+            let mut deps = mock_dependencies(44, &[]);
+            let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+            let unauthorized_sender = HumanAddr::from("terra1x46rqay4d3cssq8gxxvqz8xt6nwlz4td20k38v");
+            let init_msg = InitMsg {
+                drand_step2_contract_address: contract_address,
+            };
+            init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
+
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234234,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: true,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")
+            };
+
+            let res = handle(
+                &mut deps,
+                mock_env(unauthorized_sender, &[]),
+                msg.clone(),
+            );
+
+            match res {
+                Err(Unauthorized {backtrace: None }) => {},
+                _ => panic!("Unexpected error")
+            }
+        }
+
+        #[test]
+        fn  handle_adding_randomness_multiple_times_error() {
+            let mut deps = mock_dependencies(44, &[]);
+            let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
+            let init_msg = InitMsg {
+                drand_step2_contract_address: contract_address,
+            };
+            init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
+
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234234,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: true,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")
+            };
+
+            let _res = handle(
+                &mut deps,
+                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+                msg.clone(),
+            ).unwrap();
+
+            let msg = HandleMsg::VerifyCallBack {
+                round: 2234234,
+                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+                valid: true,
+                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")
+            };
+
+            let res = handle(
+                &mut deps,
+                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
+                msg.clone(),
+            );
+
+            match res {
+                Err(GenericErr { msg, backtrace: None }) => {
+                    assert_eq!("Randomness already added", msg)
+                },
+                _ => panic!("Unexpected error")
+            }
+        }
+
     }
+
+
     #[test]
     fn add_random_test() {
         let mut deps = mock_dependencies(44, &[]);
         let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
-        //println!("{}", HumanAddr("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string()));
         let init_msg = InitMsg {
             drand_step2_contract_address: contract_address,
         };
         init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
-
-        //let prev_sign = hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
-        //let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
         let round = 545216;
         let prev_sign = Binary::from_base64("gIO9RFHWCjKIq9lQrERpO1hEjdbroVuFuKRtWJuuPf+1HIYBHJkTIJCAwjf+ycA5BA0pHjnYsgSfqD5nsMpxvhPOArAknwuAYXFQOx+NZxoxzXOr+cdndFOl953+sXii").unwrap();
         let sign = Binary::from_base64("imgTaZQ/2cjJn+SG+i8FlqBIgQ8kuA1Izbg5BVh0pn/rbKAaysP5GSN8cjupq6kMC6JXBSpo61MDITzSNjqrEcJ1BPf4Qer2Hh2uOcR9+LHL/SFn6w9L/6Bv3PR4mMAE").unwrap();
@@ -289,107 +398,7 @@ mod tests {
             previous_signature: prev_sign,
             signature: sign,
         };
-        let res = handle(&mut deps, mock_env("address", &[]), msg.clone());
-        println!("{:?}", res);
-
-        /*
-               // Test do not send funds with add_random
-               let info = mock_info("worker", &coins(1000, "earth"));
-               let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
-               match res {
-                   Err(ContractError::DoNotSendFunds(msg)) => {
-                       assert_eq!("add_random", msg);
-                   }
-                   _ => panic!("Unexpected error"),
-               }
-
-               // Test success
-               let info = mock_info("worker", &[]);
-               let res = handle(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-               assert_eq!(0, res.messages.len());
-               // Test if random added success
-               let (_key, beacon) = beacons_storage_read(deps.as_ref().storage)
-                   .range(None, None, Order::Descending)
-                   .next()
-                   .ok_or(ContractError::NoBeacon {})
-                   .unwrap()
-                   .unwrap();
-               assert_eq!(
-                   "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
-                   hex::encode(beacon.randomness.to_vec())
-               );
-               assert_eq!(545216, beacon.round);
-               assert_eq!(
-                   deps.api
-                       .canonical_address(&HumanAddr("worker".to_string()))
-                       .unwrap(),
-                   beacon.worker
-               );
-
-               // Test query by round
-               let round = query_get(deps.as_ref(), 545216).unwrap();
-               assert_eq!(
-                   deps.api
-                       .canonical_address(&HumanAddr("worker".to_string()))
-                       .unwrap(),
-                   round.worker
-               );
-               assert_eq!(
-                   "14e7d833da2adf2dddd9ccfc2b002d397fe0f18d09c32626935184b858dafe66",
-                   hex::encode(round.randomness.to_vec())
-               );
-
-               // Test adding round already added
-               let info = mock_info("worker", &[]);
-               let res = handle(deps.as_mut(), mock_env(), info, msg);
-               match res {
-                   Err(ContractError::DrandRoundAlreadyAdded(msg)) => {
-                       assert_eq!("545216", msg)
-                   }
-                   _ => panic!("Unexpected error"),
-               }
-
-               // add new round
-               let prev_sign = hex::decode("ae5787851eb270eb0d167d5cb7c7a1494b640c4e01f7aed0aa556cd9f92f0e4f6bf7cedcb6cb36ae96de380fc04945bd19928f57a6e1d878b862c7a8d9e6bd3f3def0b3ff337eeeae18263fee2c6165c7674af864dd48a78485f831015088f20").unwrap().into();
-               let sign = hex::decode("8fd46b28c04a574be0845b8ddd2c86fc12a4203896668e0479f71f73ffa5504a69bd0240730b6c61df2ca240406d41300f723f934a5908a19334312ae6695d0adf014ad4b6b990507b16220f19f3b9246a092a24f571baecd15519db0906877c").unwrap().into();
-               let round = 550625;
-               let msg = HandleMsg::Drand {
-                   round,
-                   previous_signature: prev_sign,
-                   signature: sign,
-               };
-               let info = mock_info("worker1", &[]);
-               let _res = handle(deps.as_mut(), mock_env(), info, msg);
-               // Test query latest randomness
-               let latest_round = query_latest(deps.as_ref()).unwrap();
-               assert_eq!(
-                   deps.api
-                       .canonical_address(&HumanAddr("worker1".to_string()))
-                       .unwrap(),
-                   latest_round.worker
-               );
-               assert_eq!(
-                   "85c3054b7bef980fbcbce58fb55315f249ba3ca370f392d185afd58a4605c4a4",
-                   hex::encode(latest_round.randomness.to_vec())
-               );
-               assert_eq!(550625, latest_round.round);
-
-               // Test adding new round but with invalid signature
-               let prev_sign = hex::decode("aeed0265092cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into();
-               let sign = hex::decode("a75c1b05446c28e9babb078b5e4887761a416b52a2f484bcb388be085236edacc72c69347cb533da81e01fe26f1be34708855b48171280c6660e2eb736abe214740ce696042879f01ba5613808a041b54a80a43dadb5a6be8ed580be7e3f546e").unwrap().into();
-               let round = 545226;
-               let msg = HandleMsg::Drand {
-                   round,
-                   previous_signature: prev_sign,
-                   signature: sign,
-               };
-               let info = mock_info("worker", &[]);
-               let res = handle(deps.as_mut(), mock_env(), info, msg.clone());
-               match res {
-                   Err(ContractError::InvalidSignature {}) => {}
-                   _ => panic!("Unexpected error"),
-               }
-
-        */
+        let res = handle(&mut deps, mock_env("address", &[]), msg.clone()).unwrap();
+        assert_eq!(1, res.messages.len());
     }
 }

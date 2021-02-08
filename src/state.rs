@@ -12,7 +12,6 @@ const BEACONS_KEY: &[u8] = b"beacons";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
-    pub drand_public_key: Binary,
     pub drand_step2_contract_address: HumanAddr,
 }
 
