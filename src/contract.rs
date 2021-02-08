@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
+    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
 };
 
 use crate::msg::{
@@ -170,9 +170,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     };
     Ok(response)
 }
-fn query_verify<S: Storage, A: Api, Q: Querier>(
-    _deps: &Extern<S, A, Q>,
-) -> StdResult<StdError> {
+fn query_verify<S: Storage, A: Api, Q: Querier>(_deps: &Extern<S, A, Q>) -> StdResult<StdError> {
     Err(StdError::Unauthorized { backtrace: None })
 }
 
@@ -221,13 +219,13 @@ fn query_latest<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{HumanAddr};
+    use cosmwasm_std::HumanAddr;
     use hex;
 
     mod verify_call_back {
         use super::*;
         use cosmwasm_std::StdError::GenericErr;
-        use cosmwasm_std::StdError::{Unauthorized};
+        use cosmwasm_std::StdError::Unauthorized;
 
         #[test]
         fn success() {
@@ -249,7 +247,8 @@ mod tests {
                 &mut deps,
                 mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
                 msg.clone(),
-            ).unwrap();
+            )
+            .unwrap();
             let log_res: bool = res.log[0].value.parse().unwrap();
             assert!(log_res);
 
@@ -269,12 +268,17 @@ mod tests {
 
             // get latest round
             let state = query_latest(&mut deps).unwrap();
-            assert_eq!(HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345"), state.worker);
+            assert_eq!(
+                HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345"),
+                state.worker
+            );
 
             // get custom round
             let state = query_get(&mut deps, 2234230).unwrap();
-            assert_eq!(HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876"), state.worker);
-
+            assert_eq!(
+                HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876"),
+                state.worker
+            );
         }
 
         #[test]
@@ -300,10 +304,13 @@ mod tests {
             );
 
             match res {
-                Err(GenericErr { msg, backtrace: None }) => {
+                Err(GenericErr {
+                    msg,
+                    backtrace: None,
+                }) => {
                     assert_eq!("The randomness is not valid", msg)
-                },
-                _ => panic!("Unexpected error")
+                }
+                _ => panic!("Unexpected error"),
             }
         }
 
@@ -311,7 +318,8 @@ mod tests {
         fn sender_is_not_authorized() {
             let mut deps = mock_dependencies(44, &[]);
             let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
-            let unauthorized_sender = HumanAddr::from("terra1x46rqay4d3cssq8gxxvqz8xt6nwlz4td20k38v");
+            let unauthorized_sender =
+                HumanAddr::from("terra1x46rqay4d3cssq8gxxvqz8xt6nwlz4td20k38v");
             let init_msg = InitMsg {
                 drand_step2_contract_address: contract_address,
             };
@@ -324,20 +332,16 @@ mod tests {
                 worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6")
             };
 
-            let res = handle(
-                &mut deps,
-                mock_env(unauthorized_sender, &[]),
-                msg.clone(),
-            );
+            let res = handle(&mut deps, mock_env(unauthorized_sender, &[]), msg.clone());
 
             match res {
-                Err(Unauthorized {backtrace: None }) => {},
-                _ => panic!("Unexpected error")
+                Err(Unauthorized { backtrace: None }) => {}
+                _ => panic!("Unexpected error"),
             }
         }
 
         #[test]
-        fn  handle_adding_randomness_multiple_times_error() {
+        fn handle_adding_randomness_multiple_times_error() {
             let mut deps = mock_dependencies(44, &[]);
             let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
             let init_msg = InitMsg {
@@ -356,7 +360,8 @@ mod tests {
                 &mut deps,
                 mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
                 msg.clone(),
-            ).unwrap();
+            )
+            .unwrap();
 
             let msg = HandleMsg::VerifyCallBack {
                 round: 2234234,
@@ -372,15 +377,16 @@ mod tests {
             );
 
             match res {
-                Err(GenericErr { msg, backtrace: None }) => {
+                Err(GenericErr {
+                    msg,
+                    backtrace: None,
+                }) => {
                     assert_eq!("Randomness already added", msg)
-                },
-                _ => panic!("Unexpected error")
+                }
+                _ => panic!("Unexpected error"),
             }
         }
-
     }
-
 
     #[test]
     fn add_random_test() {
