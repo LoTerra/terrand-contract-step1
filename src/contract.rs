@@ -117,9 +117,9 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
     let canonical_address = deps.api.canonical_address(&worker)?;
-    let terrand_contract_address = deps.api.human_address(&state.drand_step2_contract_address)?;
+    let drand_step2_contract_address = deps.api.human_address(&state.drand_step2_contract_address)?;
     //env.message.sender
-    if env.message.sender != terrand_contract_address {
+    if env.message.sender != drand_step2_contract_address {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
