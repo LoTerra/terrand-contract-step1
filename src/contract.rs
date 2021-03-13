@@ -159,12 +159,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?)?,
         QueryMsg::GetRandomness { round } => to_binary(&query_get(deps, round)?)?,
         QueryMsg::LatestDrand {} => to_binary(&query_latest(deps)?)?,
-        QueryMsg::Verify {
-            signature: _,
-            msg_g2: _,
-            worker: _,
-            round: _,
-        } => to_binary(&query_verify(deps)?)?,
+        QueryMsg::Verify { .. } => to_binary(&query_verify(deps)?)?,
     };
     Ok(response)
 }
