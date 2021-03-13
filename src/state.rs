@@ -12,7 +12,7 @@ const BEACONS_KEY: &[u8] = b"beacons";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
-    pub drand_step2_contract_address: HumanAddr,
+    pub drand_step2_contract_address: CanonicalAddr,
 }
 
 pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, State> {

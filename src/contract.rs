@@ -1,7 +1,4 @@
-use cosmwasm_std::{
-    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
-};
+use cosmwasm_std::{to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg, CanonicalAddr};
 
 use crate::msg::{
     ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg,
@@ -24,7 +21,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     let state = State {
-        drand_step2_contract_address: msg.drand_step2_contract_address,
+        drand_step2_contract_address: deps.api.canonical_address( &msg.drand_step2_contract_address).unwrap(),
     };
     config(&mut deps.storage).save(&state)?;
 
@@ -101,7 +98,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
         round,
     };
 
-    let res = encode_msg(msg, contract_address)?;
+    let res = encode_msg(msg, deps.api.human_address(&contract_address).unwrap())?;
 
     Ok(HandleResponse {
         messages: vec![res.into()],
@@ -120,8 +117,9 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let state = config(&mut deps.storage).load()?;
     let canonical_address = deps.api.canonical_address(&worker)?;
+    let terrand_contract_address = deps.api.human_address(&state.drand_step2_contract_address)?;
     //env.message.sender
-    if env.message.sender != state.drand_step2_contract_address {
+    if env.message.sender != terrand_contract_address {
         return Err(StdError::Unauthorized { backtrace: None });
     }
     if !valid {
