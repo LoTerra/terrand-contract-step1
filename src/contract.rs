@@ -308,9 +308,8 @@ mod tests {
                 Err(GenericErr {
                     msg,
                     backtrace: None,
-                }) => {
-                    assert_eq!("The randomness is not valid", msg)
-                }
+                }) => assert_eq!("The randomness is not valid", msg),
+
                 _ => panic!("Unexpected error"),
             }
         }
@@ -381,9 +380,8 @@ mod tests {
                 Err(GenericErr {
                     msg,
                     backtrace: None,
-                }) => {
-                    assert_eq!("Randomness already added", msg)
-                }
+                }) => assert_eq!("Randomness already added", msg),
+
                 _ => panic!("Unexpected error"),
             }
         }
