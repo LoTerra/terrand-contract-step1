@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, CanonicalAddr, HumanAddr, Storage};
+use cosmwasm_std::{Binary, CanonicalAddr, Storage};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,

@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
+    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
 };
 
 use crate::msg::{
