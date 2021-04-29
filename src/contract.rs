@@ -107,7 +107,7 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     let res = encode_msg(msg, deps.api.human_address(&contract_address).unwrap())?;
 
     Ok(HandleResponse {
-        messages: vec![res.into()],
+        messages: vec![res],
         data: None,
         log: vec![],
     })
@@ -145,7 +145,7 @@ pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
         &round.to_be_bytes(),
         &BeaconInfoState {
             round,
-            randomness: randomness.into(),
+            randomness,
             worker: canonical_address,
         },
     )?;
