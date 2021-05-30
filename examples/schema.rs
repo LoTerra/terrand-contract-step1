@@ -3,10 +3,8 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, export_schema_with_title, remove_schemas, schema_for};
 
-use drand_oracle_p1::msg::{
-    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse,
-};
-use drand_oracle_p1::state::State;
+use terrand::msg::{ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse};
+use terrand::state::State;
 fn main() {
     let mut out_dir = current_dir().unwrap();
     out_dir.push("schema");
