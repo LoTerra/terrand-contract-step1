@@ -1,11 +1,11 @@
-use crate::state::State;
-use cosmwasm_std::{Binary, HumanAddr};
+use crate::state::Config;
+use cosmwasm_std::{Binary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InitMsg {
-    pub drand_step2_contract_address: HumanAddr,
+pub struct InstantiateMsg {
+    pub drand_step2_contract_address: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -21,14 +21,14 @@ pub enum QueryMsg {
     Verify {
         signature: Binary,
         msg_g2: Binary,
-        worker: HumanAddr,
+        worker: String,
         round: u64,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum HandleMsg {
+pub enum ExecuteMsg {
     /// Add random from this
     Drand {
         round: u64,
@@ -40,22 +40,22 @@ pub enum HandleMsg {
         round: u64,
         randomness: Binary,
         valid: bool,
-        worker: HumanAddr,
+        worker: String,
     },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct GetRandomResponse {
     pub randomness: Binary,
-    pub worker: HumanAddr,
+    pub worker: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct LatestRandomResponse {
     pub round: u64,
     pub randomness: Binary,
-    pub worker: HumanAddr,
+    pub worker: String,
 }
 
 // We define a custom struct for each query response
-pub type ConfigResponse = State;
+pub type ConfigResponse = Config;

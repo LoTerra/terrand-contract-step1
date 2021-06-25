@@ -1,56 +1,46 @@
-use cosmwasm_std::{
-    to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg,
-};
+use cosmwasm_std::{to_binary, Api, Binary, CosmosMsg, Env, LogAttribute, Order, Querier, StdError, StdResult, Storage, WasmMsg, DepsMut, MessageInfo, Response, Deps, attr};
 
-use crate::msg::{
-    ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg,
-};
-use crate::state::{
-    beacons_storage, beacons_storage_read, config, config_read, BeaconInfoState, State,
-};
+use crate::msg::{ConfigResponse, GetRandomResponse, HandleMsg, InitMsg, LatestRandomResponse, QueryMsg, InstantiateMsg, ExecuteMsg};
+use crate::state::{beacons_storage, beacons_storage_read, config, config_read, BeaconInfoState, State, CONFIG, BEACONS};
 use groupy::{CurveAffine, CurveProjective};
 use paired::bls12_381::{G2Affine, G2};
 use paired::{ExpandMsgXmd, HashToCurve};
 use sha2::{Digest, Sha256};
+use std::backtrace::Backtrace;
 
 const DOMAIN: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_";
 
 // Note, you can use StdResult in some functions where you do not
 // make use of the custom errors
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn instantiate(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     let state = State {
-        drand_step2_contract_address: deps
-            .api
-            .canonical_address(&msg.drand_step2_contract_address)
-            .unwrap(),
+        drand_step2_contract_address: deps.api.addr_canonicalize(&msg.drand_step2_contract_address)?,
     };
-    config(&mut deps.storage).save(&state)?;
+    CONFIG.save(deps.storage, &state)?;
 
-    Ok(InitResponse::default())
+    Ok(Response::default())
 }
 
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
     match msg {
         HandleMsg::Drand {
             round,
             previous_signature,
             signature,
-        } => add_random(deps, env, round, previous_signature, signature),
+        } => add_random(deps, env, info, round, previous_signature, signature),
         HandleMsg::VerifyCallBack {
             round,
             randomness,
             valid,
             worker,
-        } => verify_call_back(deps, env, round, randomness, valid, worker),
+        } => verify_call_back(deps, env, info, round, randomness, valid, worker),
     }
 }
 
@@ -73,7 +63,7 @@ fn verify_step1(round: u64, previous_signature: &[u8]) -> G2Affine {
     msg_to_curve(&msg)
 }
 
-fn encode_msg(msg: QueryMsg, address: HumanAddr) -> StdResult<CosmosMsg> {
+fn encode_msg(msg: QueryMsg, address: String) -> StdResult<CosmosMsg> {
     Ok(WasmMsg::Execute {
         contract_addr: address,
         msg: to_binary(&msg)?,
@@ -82,17 +72,17 @@ fn encode_msg(msg: QueryMsg, address: HumanAddr) -> StdResult<CosmosMsg> {
     .into())
 }
 
-pub fn add_random<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
+pub fn add_random(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
     round: u64,
     previous_signature: Binary,
     signature: Binary,
-) -> StdResult<HandleResponse> {
-    let state = config(&mut deps.storage).load()?;
-    let contract_address = state.drand_step2_contract_address;
+) ->  StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
     // Handle sender is not sending funds
-    if !env.message.sent_funds.is_empty() {
+    if !info.funds.is_empty() {
         return Err(StdError::generic_err("Do not send funds with add_random"));
     }
 
@@ -100,69 +90,63 @@ pub fn add_random<S: Storage, A: Api, Q: Querier>(
     let msg = QueryMsg::Verify {
         signature,
         msg_g2: Binary::from(verify_step1.into_compressed().as_ref()),
-        worker: env.message.sender,
+        worker: info.sender.to_string(),
         round,
     };
 
-    let res = encode_msg(msg, deps.api.human_address(&contract_address).unwrap())?;
+    let contract_address = deps.api.addr_humanize(&config.drand_step2_contract_address)?;
+    let res = encode_msg(msg, contract_address.to_string())?;
 
-    Ok(HandleResponse {
+    Ok(Response{
+        submessages: vec![],
         messages: vec![res],
-        data: None,
-        log: vec![],
+        attributes: vec![],
+        data: None
     })
 }
 
-pub fn verify_call_back<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn verify_call_back(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     round: u64,
     randomness: Binary,
     valid: bool,
-    worker: HumanAddr,
-) -> StdResult<HandleResponse> {
-    let state = config(&mut deps.storage).load()?;
-    let canonical_address = deps.api.canonical_address(&worker)?;
-    let drand_step2_contract_address = deps
-        .api
-        .human_address(&state.drand_step2_contract_address)?;
+    worker: String,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    let canonical_address = deps.api.addr_canonicalize(&worker)?;
+    let drand_step2_contract_address = deps.api.addr_humanize(&config.drand_step2_contract_address)?;
+
     //env.message.sender
-    if env.message.sender != drand_step2_contract_address {
-        return Err(StdError::Unauthorized { backtrace: None });
+    if info.sender != drand_step2_contract_address {
+        return Err(StdError::generic_err("Not authorized"));
     }
     if !valid {
         return Err(StdError::generic_err("The randomness is not valid"));
     }
+    let beacon = &BeaconInfoState {
+        round,
+        randomness,
+        worker: canonical_address,
+    };
     // Handle sender are not adding existing rounds
-    let already_added = beacons_storage(&mut deps.storage)
-        .may_load(&round.to_be_bytes())
-        .unwrap();
-    if already_added.is_some() {
-        return Err(StdError::generic_err("Randomness already added"));
-    }
-    //save beacon for oracle usage
-    beacons_storage(&mut deps.storage).save(
-        &round.to_be_bytes(),
-        &BeaconInfoState {
-            round,
-            randomness,
-            worker: canonical_address,
-        },
-    )?;
-    Ok(HandleResponse {
+    let already_added = match BEACONS.may_load(deps.storage, &round.to_be_bytes()) {
+        Some(_) => Err(StdError::generic_err("Randomness already added")),
+        //save beacon for oracle usage
+        None => BEACONS.save(deps.storage, &round.to_be_bytes(), beacon)?
+    };
+
+    Ok(Response {
+        submessages: vec![],
         messages: vec![],
+        attributes: vec![attr("isValidRandomness", "true")],
         data: None,
-        log: vec![LogAttribute {
-            key: "isValidRandomness".to_string(),
-            value: "true".to_string(),
-        }],
     })
 }
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     let response = match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?)?,
         QueryMsg::GetRandomness { round } => to_binary(&query_get(deps, round)?)?,
@@ -171,48 +155,40 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     };
     Ok(response)
 }
-fn query_verify<S: Storage, A: Api, Q: Querier>(_deps: &Extern<S, A, Q>) -> StdResult<StdError> {
-    Err(StdError::Unauthorized { backtrace: None })
+fn query_verify(_deps: Deps) -> StdResult<StdError> {
+    Err(StdError::NotFound { kind: "Not authorized".to_string(), backtrace: Backtrace::disabled() })
 }
 
-fn query_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn query_config(
+    deps: Deps,
 ) -> StdResult<ConfigResponse> {
-    let state = config_read(&deps.storage).load()?;
-    Ok(state)
+    let config = CONFIG.load(deps.storage)?;
+    Ok(config)
 }
 // Query beacon by round
-fn query_get<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn query_get(
+    deps: Deps,
     round: u64,
 ) -> StdResult<GetRandomResponse> {
-    let beacons = beacons_storage_read(&deps.storage);
-    let beacon = beacons.load(&round.to_be_bytes()).unwrap();
+    let beacon = BEACONS.load(deps.storage, &round.to_be_bytes())?;
 
     Ok(GetRandomResponse {
         randomness: beacon.randomness,
-        worker: deps.api.human_address(&beacon.worker)?,
+        worker: deps.api.addr_humanize(&beacon.worker)?.to_string(),
     })
 }
 // Query latest beacon
-fn query_latest<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn query_latest(
+    deps: Deps,
 ) -> StdResult<LatestRandomResponse> {
-    let store = beacons_storage_read(&deps.storage);
-    let mut iter = store.range(None, None, Order::Descending);
-    let (_, value) = iter
-        .next()
-        .ok_or(StdError::NotFound {
-            kind: "No beacon".to_string(),
-            backtrace: None,
-        })
-        .unwrap()
-        .unwrap();
+
+    let mut iter = BEACONS.range(deps.storage,None, None, Order::Descending);
+    let (_, value) = iter.next().ok_or(StdError::NotFound { kind: "No beacon".to_string(), backtrace: Backtrace::disabled()})??;
 
     Ok(LatestRandomResponse {
         round: value.round,
         randomness: value.randomness,
-        worker: deps.api.human_address(&value.worker)?,
+        worker: deps.api.addr_humanize(&value.worker)?.to_string(),
     })
 }
 
@@ -227,57 +203,50 @@ mod tests {
         use super::*;
         use cosmwasm_std::StdError::GenericErr;
         use cosmwasm_std::StdError::Unauthorized;
+        use cosmwasm_std::testing::mock_info;
 
         #[test]
         fn success() {
-            let mut deps = mock_dependencies(44, &[]);
-            let contract_address = HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6");
-            let init_msg = InitMsg {
-                drand_step2_contract_address: contract_address.clone(),
+            let mut deps = mock_dependencies( &[]);
+            let contract_address = "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6".to_string();
+            let init_msg = InstantiateMsg {
+                drand_step2_contract_address: contract_address,
             };
-            init(&mut deps, mock_env("terra", &[]), init_msg).unwrap();
+            let env = mock_env();
+            let info = mock_info("sender", &[]);
+            instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
 
-            let msg = HandleMsg::VerifyCallBack {
+            let msg = ExecuteMsg::VerifyCallBack {
                 round: 2234234,
                 randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
                 valid: true,
-                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345")
+                worker: "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345".to_string()
             };
-
-            let res = handle(
-                &mut deps,
-                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
-                msg.clone(),
-            )
-            .unwrap();
-            let log_res: bool = res.log[0].value.parse().unwrap();
+            let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            let log_res: bool = res.attributes[0].value.parse().unwrap();
             assert!(log_res);
 
             // Add other one
-            let msg = HandleMsg::VerifyCallBack {
+            let msg = ExecuteMsg::VerifyCallBack {
                 round: 2234230,
                 randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
                 valid: true,
-                worker: HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876")
+                worker: "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876".to_string()
             };
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-            let _res = handle(
-                &mut deps,
-                mock_env("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l8qmc6", &[]),
-                msg.clone(),
-            );
 
             // get latest round
-            let state = query_latest(&mut deps).unwrap();
+            let state = query_latest(deps.as_ref()).unwrap();
             assert_eq!(
-                HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345"),
+                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l12345".to_string(),
                 state.worker
             );
 
             // get custom round
-            let state = query_get(&mut deps, 2234230).unwrap();
+            let state = query_get(deps.as_ref(), 2234230).unwrap();
             assert_eq!(
-                HumanAddr::from("terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876"),
+                "terra1wct66yr5dzg8zh8amhzztzpnut5zx3m5l09876".to_string(),
                 state.worker
             );
         }
