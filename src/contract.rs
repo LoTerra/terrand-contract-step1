@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdError, StdResult, WasmMsg,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Response,
+    StdError, StdResult, WasmMsg,
 };
 
 use crate::msg::{
@@ -73,7 +73,7 @@ fn encode_msg(msg: QueryMsg, address: String) -> StdResult<CosmosMsg> {
     Ok(WasmMsg::Execute {
         contract_addr: address,
         msg: to_binary(&msg)?,
-        send: vec![],
+        funds: vec![],
     }
     .into())
 }
@@ -105,12 +105,7 @@ pub fn add_random(
         .addr_humanize(&config.drand_step2_contract_address)?;
     let res = encode_msg(msg, contract_address.to_string())?;
 
-    Ok(Response {
-        submessages: vec![],
-        messages: vec![res],
-        attributes: vec![],
-        data: None,
-    })
+    Ok(Response::new().add_message(res))
 }
 
 pub fn verify_call_back(
@@ -148,12 +143,7 @@ pub fn verify_call_back(
         None => BEACONS.save(deps.storage, &round.to_be_bytes(), beacon)?,
     };
 
-    Ok(Response {
-        submessages: vec![],
-        messages: vec![],
-        attributes: vec![attr("isValidRandomness", "true")],
-        data: None,
-    })
+    Ok(Response::new().add_attribute("isValidRandomness", "true"))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
