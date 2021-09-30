@@ -59,3 +59,7 @@ pub struct LatestRandomResponse {
 
 // We define a custom struct for each query response
 pub type ConfigResponse = Config;
+
+/// We currently take no arguments for migrations
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}

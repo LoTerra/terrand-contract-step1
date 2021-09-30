@@ -4,7 +4,8 @@ use cosmwasm_std::{
 };
 
 use crate::msg::{
-    ConfigResponse, ExecuteMsg, GetRandomResponse, InstantiateMsg, LatestRandomResponse, QueryMsg,
+    ConfigResponse, ExecuteMsg, GetRandomResponse, InstantiateMsg, LatestRandomResponse,
+    MigrateMsg, QueryMsg,
 };
 use crate::state::{BeaconInfoState, Config, BEACONS, CONFIG};
 use groupy::{CurveAffine, CurveProjective};
@@ -185,6 +186,11 @@ fn query_latest(deps: Deps) -> StdResult<LatestRandomResponse> {
         randomness: value.randomness,
         worker: deps.api.addr_humanize(&value.worker)?.to_string(),
     })
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 #[cfg(test)]
