@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     entry_point, to_binary, Binary, ContractResult, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
-    Order, Reply, ReplyOn, Response, StdError, StdResult, SubMsg, SubMsgExecutionResponse, WasmMsg,
+    Order, Reply, Response, StdError, StdResult, SubMsg, SubMsgExecutionResponse, WasmMsg,
 };
 
 use crate::error::ContractError;
@@ -101,14 +101,8 @@ pub fn add_random(
         .addr_humanize(&config.drand_step2_contract_address)?;
     let res = encode_msg(msg, contract_address.to_string())?;
 
-    let sub_msg = SubMsg {
-        id: 0,
-        msg: res,
-        gas_limit: None,
-        reply_on: ReplyOn::Success,
-    };
-
-    Ok(Response::new().add_submessage(sub_msg))
+    let msg = SubMsg::reply_on_success(res, 0);
+    Ok(Response::new().add_submessage(msg))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
