@@ -101,14 +101,14 @@ pub fn add_random(
         .addr_humanize(&config.drand_step2_contract_address)?;
     let res = encode_msg(msg, contract_address.to_string())?;
 
-    let sub_msg_cw20 = SubMsg {
+    let sub_msg = SubMsg {
         id: 0,
         msg: res,
         gas_limit: None,
         reply_on: ReplyOn::Success,
     };
 
-    Ok(Response::new().add_submessage(sub_msg_cw20))
+    Ok(Response::new().add_submessage(sub_msg))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
