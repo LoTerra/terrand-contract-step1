@@ -1,2 +1,2 @@
 d574ab6d987e9693fa138e1f79c08e156dbe6a0e41ece3c37f6f8855634cfb3d  drand_oracle_p1.wasm
-caf9c1312e2c1b26a1fd377c3a829eeb244b6b6038a5fffbb24be0681caa1ea9  terrand.wasm
+61e4e4afb17b324324f94c8d6166e4ee682d9e22dacc0d594f9a5ea4167eec31  terrand.wasm
