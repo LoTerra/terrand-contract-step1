@@ -43,12 +43,6 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             previous_signature,
             signature,
         } => add_random(deps, env, info, round, previous_signature, signature),
-        ExecuteMsg::VerifyCallBack {
-            round,
-            randomness,
-            valid,
-            worker,
-        } => verify_call_back(deps, env, info, round, randomness, valid, worker),
     }
 }
 
@@ -185,44 +179,6 @@ pub fn verify(
     }
 }
 
-pub fn verify_call_back(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    round: u64,
-    randomness: Binary,
-    valid: bool,
-    worker: String,
-) -> StdResult<Response> {
-    let config = CONFIG.load(deps.storage)?;
-    let canonical_address = deps.api.addr_canonicalize(&worker)?;
-    let drand_step2_contract_address = deps
-        .api
-        .addr_humanize(&config.drand_step2_contract_address)?;
-
-    //env.message.sender
-    if info.sender != drand_step2_contract_address {
-        return Err(StdError::generic_err("Not authorized"));
-    }
-    if !valid {
-        return Err(StdError::generic_err("The randomness is not valid"));
-    }
-    let beacon = &BeaconInfoState {
-        round,
-        randomness,
-        worker: canonical_address,
-    };
-    // Handle sender are not adding existing rounds
-    match BEACONS.may_load(deps.storage, &round.to_be_bytes())? {
-        Some(_) => {
-            return Err(StdError::generic_err("Randomness already added"));
-        }
-        None => BEACONS.save(deps.storage, &round.to_be_bytes(), beacon)?,
-    };
-
-    Ok(Response::new().add_attribute("isValidRandomness", "true"))
-}
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     let response = match msg {
@@ -273,12 +229,11 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use hex;
 
     mod verify_call_back {
         use super::*;
         use cosmwasm_std::testing::mock_info;
-        use cosmwasm_std::{attr, Event};
+        use cosmwasm_std::Event;
 
         #[test]
         fn success() {
@@ -333,7 +288,7 @@ mod tests {
                     data: None,
                 }),
             };
-            let res = reply(deps.as_mut(), env.clone(), rep).unwrap();
+            let _res = reply(deps.as_mut(), env.clone(), rep).unwrap();
 
             // let msg = ExecuteMsg::VerifyCallBack {
             //     round: 2234230,
@@ -409,7 +364,7 @@ mod tests {
                     data: None,
                 }),
             };
-            let res = reply(deps.as_mut(), env.clone(), rep).unwrap();
+            let _res = reply(deps.as_mut(), env.clone(), rep).unwrap();
             // Test with Reply
             let rep = Reply {
                 id: 0,

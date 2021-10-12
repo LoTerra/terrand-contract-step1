@@ -32,41 +32,6 @@
         }
       },
       "additionalProperties": false
-    },
-    {
-      "description": "Not used to be call directly",
-      "type": "object",
-      "required": [
-        "verify_call_back"
-      ],
-      "properties": {
-        "verify_call_back": {
-          "type": "object",
-          "required": [
-            "randomness",
-            "round",
-            "valid",
-            "worker"
-          ],
-          "properties": {
-            "randomness": {
-              "$ref": "#/definitions/Binary"
-            },
-            "round": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "valid": {
-              "type": "boolean"
-            },
-            "worker": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
     }
   ],
   "definitions": {
