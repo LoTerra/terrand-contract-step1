@@ -136,19 +136,18 @@ pub fn verify(
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "round")
-                        .and_then(|round| Some(round.value));
+                        .map(|round| round.value);
                     let randomness = ev
                         .clone()
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "randomness")
-                        .and_then(|rand| Some(rand.value));
+                        .map(|rand| rand.value);
                     let worker = ev
-                        .clone()
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "worker")
-                        .and_then(|worker| Some(worker.value));
+                        .map(|worker| worker.value);
 
                     Some((round?, randomness?, worker?))
                 })
