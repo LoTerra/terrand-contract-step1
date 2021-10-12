@@ -158,7 +158,7 @@ pub fn verify(
 
             let beacon = &BeaconInfoState {
                 round: round.parse::<u64>().unwrap(),
-                randomness: to_binary(&randomness)?,
+                randomness: Binary::from_base64(randomness.as_str())?,
                 worker: canonical_address,
             };
             // Handle sender are not adding existing rounds
