@@ -123,29 +123,29 @@ pub fn verify(
             let (round, randomness, worker) = subcall
                 .events
                 .into_iter()
-                .find(|e| e.ty == "message")
+                .find(|e| e.ty == "wasm")
                 .and_then(|ev| {
                     let round = ev
                         .clone()
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "round")
-                        .map(|round| round.value);
+                        .map(|round| round.value)?;
                     let randomness = ev
                         .clone()
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "randomness")
-                        .map(|rand| rand.value);
+                        .map(|rand| rand.value)?;
                     let worker = ev
                         .attributes
                         .into_iter()
                         .find(|attr| attr.key == "worker")
-                        .map(|worker| worker.value);
+                        .map(|worker| worker.value)?;
 
-                    Some((round?, randomness?, worker?))
+                    Some((round, randomness, worker))
                 })
-                .unwrap();
+                .ok_or_else(|| ContractError::ParseReplyError {})?;
 
             let canonical_address = deps.api.addr_canonicalize(&worker)?;
 
@@ -244,7 +244,7 @@ mod tests {
             let rep = Reply {
                 id: 0,
                 result: ContractResult::Ok(SubMsgExecutionResponse {
-                    events: vec![Event::new("message")
+                    events: vec![Event::new("wasm")
                         .add_attribute("round", "2234234")
                         .add_attribute(
                             "randomness",
@@ -271,7 +271,7 @@ mod tests {
             let rep = Reply {
                 id: 0,
                 result: ContractResult::Ok(SubMsgExecutionResponse {
-                    events: vec![Event::new("message")
+                    events: vec![Event::new("wasm")
                         .add_attribute("round", "2234230")
                         .add_attribute(
                             "randomness",
@@ -347,7 +347,7 @@ mod tests {
             let rep = Reply {
                 id: 0,
                 result: ContractResult::Ok(SubMsgExecutionResponse {
-                    events: vec![Event::new("message")
+                    events: vec![Event::new("wasm")
                         .add_attribute("round", "2234234")
                         .add_attribute(
                             "randomness",
@@ -362,7 +362,7 @@ mod tests {
             let rep = Reply {
                 id: 0,
                 result: ContractResult::Ok(SubMsgExecutionResponse {
-                    events: vec![Event::new("message")
+                    events: vec![Event::new("wasm")
                         .add_attribute("round", "2234234")
                         .add_attribute(
                             "randomness",
