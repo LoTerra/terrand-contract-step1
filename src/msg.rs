@@ -35,13 +35,6 @@ pub enum ExecuteMsg {
         previous_signature: Binary,
         signature: Binary,
     },
-    /// Not used to be call directly
-    VerifyCallBack {
-        round: u64,
-        randomness: Binary,
-        valid: bool,
-        worker: String,
-    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
@@ -59,3 +52,7 @@ pub struct LatestRandomResponse {
 
 // We define a custom struct for each query response
 pub type ConfigResponse = Config;
+
+/// We currently take no arguments for migrations
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}

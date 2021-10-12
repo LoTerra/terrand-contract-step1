@@ -1,10 +1,12 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Response,
-    StdError, StdResult, WasmMsg,
+    entry_point, to_binary, Binary, ContractResult, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    Order, Reply, Response, StdError, StdResult, SubMsg, SubMsgExecutionResponse, WasmMsg,
 };
 
+use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, ExecuteMsg, GetRandomResponse, InstantiateMsg, LatestRandomResponse, QueryMsg,
+    ConfigResponse, ExecuteMsg, GetRandomResponse, InstantiateMsg, LatestRandomResponse,
+    MigrateMsg, QueryMsg,
 };
 use crate::state::{BeaconInfoState, Config, BEACONS, CONFIG};
 use groupy::{CurveAffine, CurveProjective};
@@ -41,12 +43,6 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             previous_signature,
             signature,
         } => add_random(deps, env, info, round, previous_signature, signature),
-        ExecuteMsg::VerifyCallBack {
-            round,
-            randomness,
-            valid,
-            worker,
-        } => verify_call_back(deps, env, info, round, randomness, valid, worker),
     }
 }
 
@@ -105,45 +101,75 @@ pub fn add_random(
         .addr_humanize(&config.drand_step2_contract_address)?;
     let res = encode_msg(msg, contract_address.to_string())?;
 
-    Ok(Response::new().add_message(res))
+    let msg = SubMsg::reply_on_success(res, 0);
+    Ok(Response::new().add_submessage(msg))
 }
 
-pub fn verify_call_back(
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
+    match msg.id {
+        0 => verify(deps, env, msg.result),
+        _ => Err(ContractError::Unauthorized {}),
+    }
+}
+
+pub fn verify(
     deps: DepsMut,
     _env: Env,
-    info: MessageInfo,
-    round: u64,
-    randomness: Binary,
-    valid: bool,
-    worker: String,
-) -> StdResult<Response> {
-    let config = CONFIG.load(deps.storage)?;
-    let canonical_address = deps.api.addr_canonicalize(&worker)?;
-    let drand_step2_contract_address = deps
-        .api
-        .addr_humanize(&config.drand_step2_contract_address)?;
+    msg: ContractResult<SubMsgExecutionResponse>,
+) -> Result<Response, ContractError> {
+    match msg {
+        ContractResult::Ok(subcall) => {
+            let (round, randomness, worker) = subcall
+                .events
+                .into_iter()
+                .find(|e| e.ty == "wasm")
+                .and_then(|ev| {
+                    let round = ev
+                        .clone()
+                        .attributes
+                        .into_iter()
+                        .find(|attr| attr.key == "round")
+                        .map(|round| round.value)?;
+                    let randomness = ev
+                        .clone()
+                        .attributes
+                        .into_iter()
+                        .find(|attr| attr.key == "randomness")
+                        .map(|rand| rand.value)?;
+                    let worker = ev
+                        .attributes
+                        .into_iter()
+                        .find(|attr| attr.key == "worker")
+                        .map(|worker| worker.value)?;
 
-    //env.message.sender
-    if info.sender != drand_step2_contract_address {
-        return Err(StdError::generic_err("Not authorized"));
-    }
-    if !valid {
-        return Err(StdError::generic_err("The randomness is not valid"));
-    }
-    let beacon = &BeaconInfoState {
-        round,
-        randomness,
-        worker: canonical_address,
-    };
-    // Handle sender are not adding existing rounds
-    match BEACONS.may_load(deps.storage, &round.to_be_bytes())? {
-        Some(_) => {
-            return Err(StdError::generic_err("Randomness already added"));
+                    Some((round, randomness, worker))
+                })
+                .ok_or(ContractError::ParseReplyError {})?;
+
+            let canonical_address = deps.api.addr_canonicalize(&worker)?;
+
+            let beacon = &BeaconInfoState {
+                round: round.parse::<u64>().unwrap(),
+                randomness: Binary::from_base64(randomness.as_str())?,
+                worker: canonical_address,
+            };
+            // Handle sender are not adding existing rounds
+            match BEACONS.may_load(deps.storage, &round.parse::<u64>().unwrap().to_be_bytes())? {
+                Some(_) => {
+                    return Err(ContractError::DrandRoundAlreadyAdded(round));
+                }
+                None => BEACONS.save(
+                    deps.storage,
+                    &round.parse::<u64>().unwrap().to_be_bytes(),
+                    beacon,
+                )?,
+            };
+
+            Ok(Response::new().add_attribute("isValidRandomness", "true"))
         }
-        None => BEACONS.save(deps.storage, &round.to_be_bytes(), beacon)?,
-    };
-
-    Ok(Response::new().add_attribute("isValidRandomness", "true"))
+        ContractResult::Err(_) => Err(ContractError::Unauthorized {}),
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -187,15 +213,20 @@ fn query_latest(deps: Deps) -> StdResult<LatestRandomResponse> {
     })
 }
 
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use hex;
 
     mod verify_call_back {
         use super::*;
         use cosmwasm_std::testing::mock_info;
+        use cosmwasm_std::Event;
 
         #[test]
         fn success() {
@@ -208,24 +239,57 @@ mod tests {
             let info = mock_info("addr0000", &[]);
             instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
 
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234234,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: true,
-                worker: "addr0001".to_string()
+            // Test with Reply
+
+            let rep = Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("wasm")
+                        .add_attribute("round", "2234234")
+                        .add_attribute(
+                            "randomness",
+                            "2b51af9c2bc12b262e2fc955bcb9fab4c89375efee6210385c40f59948e539d6",
+                        )
+                        .add_attribute("worker", "addr0001")],
+                    data: None,
+                }),
             };
-            let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            let res = reply(deps.as_mut(), env.clone(), rep).unwrap();
+
+            // let msg = ExecuteMsg::VerifyCallBack {
+            //     round: 2234234,
+            //     randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            //     valid: true,
+            //     worker: "addr0001".to_string()
+            // };
+            // let res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
             let log_res: bool = res.attributes[0].value.parse().unwrap();
             assert!(log_res);
 
             // Add other one
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234230,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: true,
-                worker: "addr0002".to_string()
+            // Test with Reply
+            let rep = Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("wasm")
+                        .add_attribute("round", "2234230")
+                        .add_attribute(
+                            "randomness",
+                            "2b51af9c2bc12b262e2fc955bcb9fab4c89375efee6210385c40f59948e539d6",
+                        )
+                        .add_attribute("worker", "addr0002")],
+                    data: None,
+                }),
             };
-            execute(deps.as_mut(), env, info, msg).unwrap();
+            let _res = reply(deps.as_mut(), env.clone(), rep).unwrap();
+
+            // let msg = ExecuteMsg::VerifyCallBack {
+            //     round: 2234230,
+            //     randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            //     valid: true,
+            //     worker: "addr0002".to_string()
+            // };
+            // execute(deps.as_mut(), env, info, msg).unwrap();
 
             // get latest round
             let state = query_latest(deps.as_ref()).unwrap();
@@ -247,49 +311,24 @@ mod tests {
             let info = mock_info("addr0000", &[]);
             instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
 
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234234,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: false,
-                worker: "addr0000".to_string()
+            // Test with Reply
+            let rep = Reply {
+                id: 0,
+                result: ContractResult::Err("Error".to_string()),
             };
+            let res = reply(deps.as_mut(), env.clone(), rep).unwrap_err();
 
-            let res = execute(deps.as_mut(), env, info, msg);
-
+            // let msg = ExecuteMsg::VerifyCallBack {
+            //     round: 2234234,
+            //     randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            //     valid: false,
+            //     worker: "addr0000".to_string()
+            // };
+            //
+            // let res = execute(deps.as_mut(), env, info, msg);
             match res {
-                Err(StdError::GenericErr { msg, .. }) => {
-                    assert_eq!("The randomness is not valid", msg)
-                }
-
-                _ => panic!("Unexpected error"),
-            }
-        }
-
-        #[test]
-        fn sender_is_not_authorized() {
-            let mut deps = mock_dependencies(&[]);
-            let contract_address = "addr0000".to_string();
-            let unauthorized_sender = "addr0001".to_string();
-            let init_msg = InstantiateMsg {
-                drand_step2_contract_address: contract_address,
-            };
-            let env = mock_env();
-            let info = mock_info(&unauthorized_sender, &[]);
-            instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
-
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234234,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: true,
-                worker: "addr0000".to_string()
-            };
-
-            let res = execute(deps.as_mut(), env, info, msg);
-
-            match res {
-                Err(StdError::GenericErr { msg, .. }) => assert_eq!("Not authorized", msg),
-
-                _ => panic!("Unexpected error"),
+                ContractError::Unauthorized {} => {}
+                e => panic!("expected unauthorized error, got {}", e),
             }
         }
 
@@ -304,28 +343,65 @@ mod tests {
             let info = mock_info("addr0000", &[]);
             instantiate(deps.as_mut(), env.clone(), info.clone(), init_msg).unwrap();
 
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234234,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: true,
-                worker: "addr0000".to_string()
+            // Test with Reply
+            let rep = Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("wasm")
+                        .add_attribute("round", "2234234")
+                        .add_attribute(
+                            "randomness",
+                            "2b51af9c2bc12b262e2fc955bcb9fab4c89375efee6210385c40f59948e539d6",
+                        )
+                        .add_attribute("worker", "addr0000")],
+                    data: None,
+                }),
             };
-
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-            let msg = ExecuteMsg::VerifyCallBack {
-                round: 2234234,
-                randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
-                valid: true,
-                worker: "addr0001".to_string()
+            let _res = reply(deps.as_mut(), env.clone(), rep).unwrap();
+            // Test with Reply
+            let rep = Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("wasm")
+                        .add_attribute("round", "2234234")
+                        .add_attribute(
+                            "randomness",
+                            "2b51af9c2bc12b262e2fc955bcb9fab4c89375efee6210385c40f59948e539d6",
+                        )
+                        .add_attribute("worker", "addr0001")],
+                    data: None,
+                }),
             };
+            let res = reply(deps.as_mut(), env.clone(), rep).unwrap_err();
 
-            let res = execute(deps.as_mut(), env, info, msg);
+            // let msg = ExecuteMsg::VerifyCallBack {
+            //     round: 2234234,
+            //     randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            //     valid: true,
+            //     worker: "addr0000".to_string()
+            // };
+            //
+            // execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            // let msg = ExecuteMsg::VerifyCallBack {
+            //     round: 2234234,
+            //     randomness: hex::decode("aeed0765b92cc221959c6c7e4f154d83252cf7f6eb7ad8f416de8b0c49ce1f848c8b19dc31a34a7ca0abbb2fbeb198530da8519a7bc7947015fb8973e9d403ef420fa69324030b2efa5c4dc7c87e3db58eec79f20565bc8a3473095dbdb1fbb1").unwrap().into(),
+            //     valid: true,
+            //     worker: "addr0001".to_string()
+            // };
+            //
+            // let res = execute(deps.as_mut(), env, info, msg);
+            // match res {
+            //     Err(StdError::GenericErr { msg, .. }) => {
+            //         assert_eq!("Randomness already added", msg)
+            //     }
+            //
+            //     _ => panic!("Unexpected error"),
+            // }
             match res {
-                Err(StdError::GenericErr { msg, .. }) => {
-                    assert_eq!("Randomness already added", msg)
+                ContractError::DrandRoundAlreadyAdded(round) => {
+                    assert_eq!(round, "2234234")
                 }
-
-                _ => panic!("Unexpected error"),
+                e => panic!("expected unauthorized error, got {}", e),
             }
         }
     }
