@@ -145,7 +145,7 @@ pub fn verify(
 
                     Some((round, randomness, worker))
                 })
-                .ok_or_else(|| ContractError::ParseReplyError {})?;
+                .ok_or(ContractError::ParseReplyError {})?;
 
             let canonical_address = deps.api.addr_canonicalize(&worker)?;
 
