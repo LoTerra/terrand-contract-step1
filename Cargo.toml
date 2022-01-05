@@ -1,6 +1,6 @@
 [package]
 name = "terrand"
-version = "3.2.1"
+version = "3.2.2"
 authors = ["0xantman <antho74830@gmail.com>"]
 edition = "2018"
 homepage = "https://docs.terrand.dev"
@@ -34,6 +34,8 @@ overflow-checks = true
 [features]
 # for more explicit tests, cargo test --features=backtraces
 backtraces = ["cosmwasm-std/backtraces"]
+# use library feature to disable all instantiate/execute/query exports
+library = []
 
 [dependencies]
 cosmwasm-std = { version = "0.16.0", features = ["iterator"]  }
