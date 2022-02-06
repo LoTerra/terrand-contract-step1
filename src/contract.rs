@@ -230,7 +230,7 @@ mod tests {
 
         #[test]
         fn success() {
-            let mut deps = mock_dependencies(&[]);
+            let mut deps = mock_dependencies();
             let contract_address = "addr0000".to_string();
             let init_msg = InstantiateMsg {
                 drand_step2_contract_address: contract_address,
@@ -302,7 +302,7 @@ mod tests {
 
         #[test]
         fn not_valid_randomness() {
-            let mut deps = mock_dependencies(&[]);
+            let mut deps = mock_dependencies();
             let contract_address = "addr0000".to_string();
             let init_msg = InstantiateMsg {
                 drand_step2_contract_address: contract_address,
@@ -334,7 +334,7 @@ mod tests {
 
         #[test]
         fn handle_adding_randomness_multiple_times_error() {
-            let mut deps = mock_dependencies(&[]);
+            let mut deps = mock_dependencies();
             let contract_address = "addr0000".to_string();
             let init_msg = InstantiateMsg {
                 drand_step2_contract_address: contract_address,
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn add_random_test() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
         let contract_address = "addr0000".to_string();
         let init_msg = InstantiateMsg {
             drand_step2_contract_address: contract_address,
